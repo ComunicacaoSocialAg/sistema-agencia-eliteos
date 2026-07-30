@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
@@ -168,6 +168,54 @@ export function useTasks(clientId, options = {}) {
     }
   };
 
+  const toggleChecklist = async (taskId, itemId) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const newChecklist = (t.checklist || []).map(item =>
+        item.id === itemId ? { ...item, is_done: !item.is_done } : item
+      );
+      const updated = { ...t, checklist: newChecklist };
+      if (isFirebaseConfigured) {
+        updateDoc(doc(db, 'tasks', taskId), { checklist: newChecklist }).catch(() => {});
+      }
+      return updated;
+    }));
+  };
+
+  const applyTemplate = async (templateType, targetClientId = null) => {
+    const templates = {
+      'social-media': [
+        { title: 'Planejamento Editorial do Mês', priority: 'high', demand_status: 'em_producao' },
+        { title: 'Criação de Artes Carrossel', priority: 'medium', demand_status: 'em_producao' },
+        { title: 'Redação de Copy e Legendas', priority: 'medium', demand_status: 'revisao_interna' },
+        { title: 'Agendamento e Publicação', priority: 'low', demand_status: 'aguardando_cliente' }
+      ],
+      'onboarding': [
+        { title: 'Disparo de Boas-Vindas & Acessos', priority: 'high', demand_status: 'em_producao' },
+        { title: 'Auditoria de Ativos & Drive', priority: 'high', demand_status: 'revisao_interna' },
+        { title: 'Reunião de Kickoff Estratégico', priority: 'urgent', demand_status: 'em_producao' }
+      ]
+    };
+
+    const selectedTemplate = templates[templateType] || templates['social-media'];
+    const created = [];
+
+    for (const item of selectedTemplate) {
+      const task = await createTask({
+        title: item.title,
+        priority: item.priority,
+        status: 'a-fazer',
+        demand_status: item.demand_status,
+        client_id: targetClientId || clientId,
+        deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+      });
+      if (task) created.push(task);
+    }
+
+    toast.success(`Template "${templateType}" aplicado com sucesso!`);
+    return created;
+  };
+
   const addComment = async (taskId, content, authorName = 'Bruno', isAI = false) => {
     const newComment = {
       id: crypto.randomUUID(),
@@ -206,6 +254,8 @@ export function useTasks(clientId, options = {}) {
     createTask, 
     updateTask, 
     deleteTask, 
+    toggleChecklist,
+    applyTemplate,
     addComment 
   };
 }

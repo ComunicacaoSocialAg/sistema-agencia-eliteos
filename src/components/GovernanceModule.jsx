@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Shield, Calendar, Users, BarChart3, CheckCircle2, Clock, Plus, MessageSquare, AlertCircle, Award } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
 
-const RITOS = [
+const DEFAULT_RITOS = [
   {
     id: 'rito-semanal',
     title: 'Acompanhamento de Demandas (Semanal)',
@@ -57,8 +57,24 @@ const RITOS = [
 ];
 
 export default function GovernanceModule({ client }) {
-  const [ritos, setRitos] = useState(RITOS);
-  const [selectedRito, setSelectedRito] = useState(null);
+  const storageKey = `csag_ritos_${client?.id || 'demo'}`;
+
+  const [ritos, setRitos] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved ? JSON.parse(saved) : DEFAULT_RITOS;
+    } catch {
+      return DEFAULT_RITOS;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(ritos));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [ritos, storageKey]);
 
   const handleCompleteRito = (ritoId) => {
     setRitos(prev => prev.map(r => {
@@ -70,6 +86,8 @@ export default function GovernanceModule({ client }) {
     }));
     toast.success('Rito registrado como realizado!');
   };
+
+  const completedCount = ritos.filter(r => r.status === 'em_dia').length;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -87,7 +105,7 @@ export default function GovernanceModule({ client }) {
 
         <div className="flex items-center gap-2">
           <span className="px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold uppercase">
-            Governança Ativa (5/5 Ritos)
+            Governança Ativa ({completedCount}/{ritos.length} Ritos)
           </span>
         </div>
       </div>

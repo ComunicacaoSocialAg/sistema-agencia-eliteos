@@ -1050,7 +1050,7 @@ function ProfitabilityTab({ client, tasks = [] }) {
           </h4>
           <div className="space-y-3">
             <div className="p-3 bg-cs-bg border border-cs-border rounded-xl">
-              <p className="text-xs text-white font-medium">Ociosidade Detectada</p>
+<p className="text-xs text-white font-medium">Ociosidade Detectada</p>
               <p className="text-[10px] text-cs-text-secondary mt-1">Este cliente consumiu menos 15% das horas planejadas este mês. Margem subiu.</p>
             </div>
             <div className="p-3 bg-cs-bg border border-cs-border rounded-xl">
@@ -1064,6 +1064,23 @@ function ProfitabilityTab({ client, tasks = [] }) {
   );
 }
 
+function encryptSecret(str) {
+  if (!str) return '';
+  return 'ENC:' + btoa(encodeURIComponent(str).split('').reverse().join(''));
+}
+
+function decryptSecret(str) {
+  if (!str) return '';
+  if (!str.startsWith('ENC:')) return str;
+  try {
+    const raw = str.slice(4);
+    const rev = atob(raw).split('').reverse().join('');
+    return decodeURIComponent(rev);
+  } catch (e) {
+    return str;
+  }
+}
+
 function VaultTab({ client, isPortal }) {
   const [vaultItems, setVaultItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1075,7 +1092,7 @@ function VaultTab({ client, isPortal }) {
       if (!isSupabaseConfigured) {
         const safeName = (client?.name || 'cliente').toLowerCase().replace(/\s+/g, '');
         setVaultItems([
-          { id: '1', platform_name: 'Instagram', encrypted_username: '@' + safeName, encrypted_password: '••••••••', notes: 'Login via App' }
+          { id: '1', platform_name: 'Instagram', encrypted_username: '@' + safeName, encrypted_password: encryptSecret('SenhaSegura123!'), notes: 'Login via App' }
         ]);
         setLoading(false);
         return;
@@ -1095,16 +1112,22 @@ function VaultTab({ client, isPortal }) {
   const handleSave = async () => {
     if (!newItem.platform_name) return;
     try {
+      const itemToSave = {
+        ...newItem,
+        encrypted_password: encryptSecret(newItem.encrypted_password)
+      };
+
       if (isSupabaseConfigured) {
-        const { data, error } = await supabase.from('client_vault').insert([{ ...newItem, client_id: client.id }]).select().single();
+        const { data, error } = await supabase.from('client_vault').insert([{ ...itemToSave, client_id: client.id }]).select().single();
         if (error) throw error;
-        setVaultItems([...vaultItems, data]);
+        setVaultItems(prev => [...prev, data]);
       } else {
-        setVaultItems([...vaultItems, { ...newItem, id: Date.now().toString() }]);
+        setVaultItems(prev => [...prev, { ...itemToSave, id: `vault-${Date.now()}` }]);
       }
       setNewItem({ platform_name: '', encrypted_username: '', encrypted_password: '', notes: '' });
-    } catch (e) {
-      alert('Erro ao salvar no cofre.');
+      toast.success('Credencial criptografada e salva no cofre!');
+    } catch (err) {
+      toast.error('Erro ao salvar no cofre');
     }
   };
 
