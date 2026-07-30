@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cs-bg: #09090b; /* Zinc 950 */
+  --color-cs-surface: #18181b; /* Zinc 900 */
+  --color-cs-surface-hover: #27272a; /* Zinc 800 */
+  --color-cs-border: #27272a; /* Zinc 800 */
+  --color-cs-primary: #f7d406; /* Logo Gold */
+  --color-cs-primary-hover: #d1b204; /* Darker Gold */
+  --color-cs-accent: #f7d406; /* Logo Gold */
+  --color-cs-text-primary: #f4f4f5; /* Zinc 100 */
+  --color-cs-text-secondary: #a1a1aa; /* Zinc 400 */
+}
+
+@layer base {
+  html, body {
+    @apply bg-cs-bg text-cs-text-primary antialiased;
+  }
+}

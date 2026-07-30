@@ -1,0 +1,373 @@
+{
+  "cliente": "Ponto Cor Armarinho e Aviamentos",
+  "agencia": "Comunicação Social Ag",
+  "periodo": "Trimestre Junho-Julho-Agosto 2026",
+  "posicionamento_macro": {
+    "conceito_central": "Tecer Afetos, Vestir o Amanhã",
+    "grande_ideia": "Ponto Cor: Onde o Afeto Floresce",
+    "foco_emocional": "Ternura, acolhimento, cuidado e aconchego sensorial através do fazer manual (Slow Living).",
+    "paleta_cores_tendencia": [
+      {
+        "nome": "Cloud Dancer",
+        "significado": "Branco cremoso que transmite pureza, modernidade e luxo minimalista.",
+        "aplicacao": "Looks monocromáticos, vestidos de tricô e cardigãs.",
+        "fio_referencia": "Cisne Style"
+      },
+      {
+        "nome": "Marrom Chocolate",
+        "significado": "O novo preto de 2026. Estabilidade, conforto e luxo discreto.",
+        "aplicacao": "Peças de alfaiataria texturizada e mantas de sofá.",
+        "fio_referencia": "Fio New Pérola"
+      },
+      {
+        "nome": "Bordeaux / Burgundy",
+        "significado": "Poder, elegância clássica e calor para as estações frias.",
+        "aplicacao": "Acessórios de destaque, gorros e boinas de luxo.",
+        "fio_referencia": "Fio Hug Cisne"
+      },
+      {
+        "nome": "Verde Oliva",
+        "significado": "Conexão profunda com a natureza, equilíbrio e neutralidade orgânica.",
+        "aplicacao": "Moda casual de inverno, almofadas e mantas decorativas.",
+        "fio_referencia": "Fio Design Cisne"
+      }
+    ]
+  },
+  "pesquisa_tendencias_2026": {
+    "moda": {
+      "marshmallow_knits": "Peças extremamente fofas, volumosas e táteis tecidas em tons pastéis.",
+      "grandpa_core": "Retorno de cardigãs oversized masculinos, suéteres e coletes vintage com botões clássicos.",
+      "vintage_baby": "Enxovais infantis com foco em fios antialérgicos de toque ultra-suave como bambu e seda.",
+      "arraia_chic": "Customização de camisas e calças jeans usando rendas de algodão e pontos clássicos de bordado."
+    },
+    "comportamento": {
+      "cozy_crafting": "O artesanato como terapia, ferramenta de regulação emocional e autocuidado diário.",
+      "slow_living": "Foco no prazer físico e mental do processo de tecer lenta e carinhosamente."
+    }
+  },
+  "calendario_redes_sociais": {
+    "frequencia_postagem": "3 posts por semana no feed (Segunda, Quarta e Sexta) + Stories diários",
+    "rotina_stories": {
+      "manha": "Café com Trama: Bastidores da loja, rotina de atendimento e novidades físicas na prateleira.",
+      "tarde": "Dica de Ouro: Tutoriais de 15s de técnica, indicação de agulhas certas para cada fio ou soluções de balcão.",
+      "noite": "Comunidade Ponto Cor: Interação ativa com enquetes de paletas de cor, caixas de pergunta e reposts de clientes."
+    },
+    "programacao_mensal": [
+      {
+        "mes": "Junho",
+        "conceito_mensal": "Laços que Protegem",
+        "foco_comercial": "Dia dos Namorados, Festa Junina e Abertura da Copa do Mundo 2026",
+        "cronograma_posts": [
+          {
+            "semana": "Semana 1",
+            "tema": "O Presente que Aquece",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Carrossel sobre o Luxo do Feito à Mão e o valor imensurável de um presente exclusivo em 2026."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Apresentação dos fios premium Bordeaux (Burgundy) para o Dia dos Namorados."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Kit 'Tricote seu Amor' (Cachecol fácil e rápido para tecer até o dia 12)."
+            }
+          },
+          {
+            "semana": "Semana 2",
+            "tema": "Paixão e Detalhes",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Feliz Dia dos Namorados - Histórias de amor de artesãos que tecem juntos."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Brasil Core: Tons de verde e amarelo aplicados em texturas de tricô de luxo."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Vitrine Junina: Seleção especial de rendas e fitas de cetim para o Arraiá Chic."
+            }
+          },
+          {
+            "semana": "Semana 3",
+            "tema": "Arraiá Chic - Tradição e Modernidade",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Acessórios de crochê para o Arraiá Chic utilizando a paleta de terracota."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Tutorial de bordado livre para aplicar e customizar camisas xadrez clássicas."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Arraiá de Ofertas Ponto Cor: Bota-fora de algodão mercerizado em tons juninos."
+            }
+          },
+          {
+            "semana": "Semana 4",
+            "tema": "O São João da Criatividade",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "GRWM (Get Ready With Me) - Look de torcida estilizado com crochê nas cores do Brasil."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "A manta gigante que abraça a família no sofá em dias de jogos da seleção."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Convite para o Workshop presencial de Amigurumis temáticos na loja física."
+            }
+          }
+        ]
+      },
+      {
+        "mes": "Julho",
+        "conceito_mensal": "O Auge do Aconchego",
+        "foco_comercial": "Férias de Inverno, Julho Fest (Festival de Poços de Caldas) e Dia dos Avós",
+        "cronograma_posts": [
+          {
+            "semana": "Semana 1",
+            "tema": "O Inverno das Passarelas",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Sobretudos de crochê e tramas pesadas como tendência máxima de alta costura em 2026."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "O toque do fio Cloud Dancer e a elegância do off-white no vestuário térmico."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Mantas de tricô gigante para sofá. Antecipe-se ao frio do Festival."
+            }
+          },
+          {
+            "semana": "Semana 2",
+            "tema": "Abertura do Festival de Inverno",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Poços de Caldas e o Fio que nos Une: Homenagem ao Julho Fest e à cultura regional."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Look do Dia Festival: Cores, texturas e peças para passear no Parque José Affonso Junqueira."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Blitz de Inverno: Lançamento do espaço interativo de texturas e café na loja física."
+            }
+          },
+          {
+            "semana": "Semana 3",
+            "tema": "Técnica e Sofisticação",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Especial Dia dos Avós: O legado, as heranças criativas e o amor que atravessa gerações."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Dicas essenciais para trabalhar com fios complexos como mohair e fios bouclé."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Kits especiais de Dia dos Avós: Fios nobres e agulhas ergonômicas para presentear."
+            }
+          },
+          {
+            "semana": "Semana 4",
+            "tema": "Aconchego e Lar",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Artesanato como santuário: O armarinho como o seu refúgio de paz durante as férias."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "ASMR de tricô com agulhas de madeira: Som relaxante das mãos em movimento."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Liquidação 'Últimos Novelos de Inverno': Giro de estoque de lãs pesadas."
+            }
+          }
+        ]
+      },
+      {
+        "mes": "Agosto",
+        "conceito_mensal": "Legados e Florescimento",
+        "foco_comercial": "Dia dos Pais, Dia da Gestante e Preview da Primavera",
+        "cronograma_posts": [
+          {
+            "semana": "Semana 1",
+            "tema": "Pais Artesãos e Legados",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Homens que tecem: Quebrando preconceitos de gênero no tricô, crochê e costura."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Kits Dia dos Pais: Fios sóbrios e agulhas com cabos de madeira rústica de luxo."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Herança de Pai: O ato de passar conhecimentos práticos de geração em geração."
+            }
+          },
+          {
+            "semana": "Semana 2",
+            "tema": "O Ninho de Amor",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Especial Dia da Gestante (15/08): O ato de tecer o ninho com as próprias mãos."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Fios de bambu e algodão egípcio: O toque suave e antialérgico ideal para bebês."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Lançamento dos Kits de Maternidade Ponto Cor com receitas de sapatinhos e golas."
+            }
+          },
+          {
+            "semana": "Semana 3",
+            "tema": "O Despertar da Primavera",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Preview de Primavera: Cores pastéis e a transição estética dos fios pesados para os leves."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Tutorial de crochê de superfície para aplicação de flores delicadas em relevo."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Lançamento oficial da Coleção Primavera-Verão com fios de alta fluidez."
+            }
+          },
+          {
+            "semana": "Semana 4",
+            "tema": "A Estação da Renovação",
+            "seg_post": {
+              "tipo": "Branding / Inspiração",
+              "conteudo": "Crie um jardim no seu ateliê: Ideias de decoração floral feitas à mão."
+            },
+            "qua_post": {
+              "tipo": "Técnica / Produto",
+              "conteudo": "Como fazer o ponto pipoca para dar volume a pétalas de flores de crochê."
+            },
+            "sex_post": {
+              "tipo": "Conversão / Venda",
+              "conteudo": "Grande Bota-fora Geral de Inverno para renovação completa das prateleiras."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "calendario_comercial": {
+    "junho": [
+      {
+        "data_inicio": "2026-06-01",
+        "data_fim": "2026-06-12",
+        "acao": "Campanha 'Amor Entrelaçado' (Dia dos Namorados)",
+        "meta": "Faturar com presentes afetivos artesanais e kits prontos de tricô."
+      },
+      {
+        "data_inicio": "2026-06-13",
+        "data_fim": "2026-06-30",
+        "acao": "Arraiá de Ofertas Ponto Cor & Campanha Brasil Core Copa 2026",
+        "meta": "Zerar estoque de fios de algodão de cores juninas e lançar fios da torcida."
+      }
+    ],
+    "julho": [
+      {
+        "data_inicio": "2026-07-01",
+        "data_fim": "2026-07-28",
+        "acao": "Blitz Julho Fest (Festival de Inverno de Poços de Caldas)",
+        "meta": "Capturar o tráfego turístico de Poços com marketing sensorial e vitrine de luxo."
+      },
+      {
+        "data_inicio": "2026-07-15",
+        "data_fim": "2026-07-26",
+        "acao": "Campanha 'Legado Criativo' (Dia dos Avós)",
+        "meta": "Vender kits e agulhas ergonômicas. Promover chá presencial com avós artesãs."
+      }
+    ],
+    "agosto": [
+      {
+        "data_inicio": "2026-08-01",
+        "data_fim": "2026-08-09",
+        "acao": "Campanha 'Pai que Cria' (Dia dos Pais)",
+        "meta": "Desmistificar o artesanato masculino e vender acessórios de tricô sóbrios."
+      },
+      {
+        "data_inicio": "2026-08-10",
+        "data_fim": "2026-08-20",
+        "acao": "Quinzena do Aconchego - Especial Dia da Gestante (15/08)",
+        "meta": "Vender fios antialérgicos de alta gama para enxovais de bebês."
+      },
+      {
+        "data_inicio": "2026-08-25",
+        "data_fim": "2026-08-31",
+        "acao": "Grande Bota-fora Geral de Inverno",
+        "meta": "Limpeza total de lãs pesadas do estoque físico para a chegada da Primavera."
+      }
+    ]
+  },
+  "calendario_operacional": {
+    "regras_mensais_agencia_cliente": {
+      "dia_15": {
+        "responsavel": "Ponto Cor (Cliente)",
+        "acao": "Enviar planilha detalhada de estoque crítico, produtos-chave e tabelas de preços dos kits."
+      },
+      "dia_18": {
+        "responsavel": "Comunicação Social Ag",
+        "acao": "Entrega do Moodboard Visual e conceituação estética do mês seguinte."
+      },
+      "dia_20": {
+        "responsavel": "Ponto Cor (Cliente)",
+        "acao": "Envio de fotos e vídeos brutos (via celular) de todos os lançamentos e novidades da loja."
+      },
+      "dia_23": {
+        "responsavel": "Comunicação Social Ag",
+        "acao": "Redação final de todo o copywriting (legendas) e roteiros de vídeos de Reels/ASMR."
+      },
+      "dia_25": {
+        "responsavel": "Ambas as partes",
+        "acao": "Aprovação final do calendário, agendamento de posts e setup técnico das campanhas de tráfego pago."
+      },
+      "dia_28": {
+        "responsavel": "Ponto Cor (Cliente)",
+        "acao": "Treinamento presencial com a equipe de balcão e consultoras sobre o foco comercial do mês."
+      },
+      "toda_quarta": {
+        "responsavel": "Ponto Cor (Cliente)",
+        "acao": "Gravar e enviar vídeos rápidos de 'Vida Real' (consultoria de balcão ou café na loja) para stories."
+      },
+      "dia_05": {
+        "responsavel": "Comunicação Social Ag",
+        "acao": "Envio do Relatório de Performance digital (Alcance, CRM RD Station e ROI)."
+      }
+    }
+  },
+  "experiencia_offline_pdv": {
+    "marketing_sensorial": {
+      "olfato": "Identidade olfativa contínua com aroma suave de Baunilha e Algodão.",
+      "tato": "Estações 'Sinta o Fio' na entrada com amostras de fios tecidos para experimentação.",
+      "audicao": "Playlist exclusiva de Bossa Nova e Jazz Instrumental operando em 45-55 dB.",
+      "paladar": "Café mineiro gourmet e biscoitos de canela oferecidos nas manhãs de Sábado."
+    },
+    "acoes_guerrilha_regional": {
+      "julho_fest_blitz": "Distribuição de sachês aromáticos de crochê para turistas que visitam a loja durante o festival."
+    },
+    "unboxing_experience": {
+      "aroma": "Caixas do e-commerce borrifadas com a fragrância exclusiva da Ponto Cor.",
+      "afeto": "Cartão físico de agradecimento escrito à mão: 'Sua história de amor começa aqui.'",
+      "brinde": "Inclusão de um pequeno marcador de pontos de crochê personalizado."
+    }
+  }
+}
