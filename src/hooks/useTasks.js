@@ -1,35 +1,63 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-
-// Demo data fallback
-const DEMO_TASKS = [];
-
-
-import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
+
+const INITIAL_DEMO_TASKS = [
+  {
+    id: 'task-1',
+    title: 'Carrossel Lançamento Linha Gourmet (3/3)',
+    description: 'Criar conceito visual e arte para Instagram e Meta Ads do molho especial.',
+    client_id: 'client-dubola',
+    client_name: 'Dubola Molhos Especiais',
+    client: { name: 'Dubola Molhos Especiais' },
+    status: 'em-producao',
+    demand_status: 'em_producao',
+    priority: 'high',
+    assigned_to: 'Ana (Designer)',
+    deadline: '2026-08-05',
+    checklist: [
+      { id: 'chk-1', text: 'Design dos 3 cards', is_done: true },
+      { id: 'chk-2', text: 'Revisão de Copywriting', is_done: false }
+    ],
+    comments: [],
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'task-2',
+    title: 'Setup de Mídia Meta Ads & Pixel GA4',
+    description: 'Configuração do gerenciador de anúncios e conversão da landing page.',
+    client_id: 'client-pontocor',
+    client_name: 'Ponto Cor Fotografia',
+    client: { name: 'Ponto Cor Fotografia' },
+    status: 'aguardando-cliente',
+    demand_status: 'aguardando_cliente',
+    priority: 'medium',
+    assigned_to: 'Carlos (Mídia)',
+    deadline: '2026-08-08',
+    checklist: [],
+    comments: [],
+    created_at: new Date().toISOString()
+  }
+];
 
 export function useTasks(clientId, options = {}) {
   const { showArchived = false } = options;
+
   const [tasks, setTasks] = useState(() => {
-    let initial = DEMO_TASKS;
-    if (clientId) {
-      initial = initial.filter(t => t.client_id === clientId || (t.client && t.client.name === clientId));
+    try {
+      const saved = localStorage.getItem('csag_custom_tasks');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn(e);
     }
-    if (!showArchived) {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      initial = initial.filter(t => {
-        if (t.status !== 'concluido') return true;
-        if (!t.deadline) return true;
-        const d = new Date(t.deadline);
-        return d >= thirtyDaysAgo;
-      });
-    }
-    return initial;
+    return INITIAL_DEMO_TASKS;
   });
+
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!isFirebaseConfigured || !db) {
@@ -50,7 +78,7 @@ export function useTasks(clientId, options = {}) {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         data = data.filter(t => {
-          if (t.status !== 'concluido') return true;
+          if (t.status !== 'concluido' && t.demand_status !== 'publicado') return true;
           if (!t.deadline) return true;
           const d = new Date(t.deadline);
           return d >= thirtyDaysAgo;
@@ -61,18 +89,27 @@ export function useTasks(clientId, options = {}) {
       setLoading(false);
     }, (err) => {
       console.warn('[Firebase] Erro ao buscar tarefas:', err.message);
-      setError(err.message);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [clientId, showArchived]);
 
-  const updateTask = async (updatedTask) => {
+  // Persistência local em modo demo
+  useEffect(() => {
     if (!isFirebaseConfigured) {
-      setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
-      return;
+      try {
+        localStorage.setItem('csag_custom_tasks', JSON.stringify(tasks));
+      } catch (e) {
+        console.warn(e);
+      }
     }
+  }, [tasks]);
+
+  const updateTask = async (updatedTask) => {
+    setTasks(prev => prev.map(t => t.id === updatedTask.id ? { ...t, ...updatedTask } : t));
+
+    if (!isFirebaseConfigured) return;
 
     try {
       const { id, is_tracking, client, ...dbTask } = updatedTask;
@@ -86,18 +123,21 @@ export function useTasks(clientId, options = {}) {
     const { checklist: initialChecklist, ...baseData } = taskData;
     const newTask = {
       ...baseData,
+      id: taskData.id || crypto.randomUUID(),
       client: { name: taskData.client_name || 'Novo Cliente' },
-      comments: [],
+      comments: taskData.comments || [],
       checklist: initialChecklist || [],
+      status: taskData.status || 'a-fazer',
+      demand_status: taskData.demand_status || 'em_producao',
       is_tracking: false,
       tracked_seconds: 0,
       created_at: new Date().toISOString(),
     };
 
+    setTasks(prev => [newTask, ...prev]);
+
     if (!isFirebaseConfigured) {
-      newTask.id = crypto.randomUUID();
-      setTasks(prev => [...prev, newTask]);
-      toast.success('Tarefa criada (Modo Demo)');
+      toast.success('Tarefa criada com sucesso!');
       return newTask;
     }
 
@@ -106,11 +146,25 @@ export function useTasks(clientId, options = {}) {
       newTask.id = docRef.id;
       const { client, is_tracking, ...dbTask } = newTask;
       await setDoc(docRef, dbTask);
-      toast.success('Tarefa criada com sucesso!');
+      toast.success('Tarefa salva no banco!');
       return newTask;
     } catch (e) {
       toast.error('Erro ao salvar tarefa');
       return null;
+    }
+  };
+
+  const deleteTask = async (taskId) => {
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    if (!isFirebaseConfigured) {
+      toast.success('Tarefa excluída!');
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'tasks', taskId));
+      toast.success('Tarefa excluída!');
+    } catch (e) {
+      toast.error('Erro ao remover tarefa');
     }
   };
 
@@ -123,12 +177,11 @@ export function useTasks(clientId, options = {}) {
       created_at: new Date().toISOString(),
     };
 
-    if (!isFirebaseConfigured) {
-      setTasks(prev => prev.map(t =>
-        t.id === taskId ? { ...t, comments: [...(t.comments || []), newComment] } : t
-      ));
-      return;
-    }
+    setTasks(prev => prev.map(t =>
+      t.id === taskId ? { ...t, comments: [...(t.comments || []), newComment] } : t
+    ));
+
+    if (!isFirebaseConfigured) return;
 
     try {
       const task = tasks.find(t => t.id === taskId);
@@ -141,80 +194,18 @@ export function useTasks(clientId, options = {}) {
     }
   };
 
-  const toggleChecklist = async (taskId, itemId) => {
-    if (!isFirebaseConfigured) {
-      setTasks(prev => prev.map(t => {
-        if (t.id !== taskId) return t;
-        const newChecklist = t.checklist.map(item => 
-          item.id === itemId ? { ...item, is_done: !item.is_done } : item
-        );
-        return { ...t, checklist: newChecklist };
-      }));
-      return;
-    }
+  // Filtrar tarefas se clientId for fornecido
+  const filteredTasks = clientId 
+    ? tasks.filter(t => t.client_id === clientId || (t.client && t.client.name === clientId))
+    : tasks;
 
-    try {
-      const task = tasks.find(t => t.id === taskId);
-      if (task) {
-        const newChecklist = task.checklist.map(item => 
-          item.id === itemId ? { ...item, is_done: !item.is_done } : item
-        );
-        await updateDoc(doc(db, 'tasks', taskId), { checklist: newChecklist });
-      }
-    } catch (e) {
-      toast.error('Erro ao atualizar checklist');
-    }
+  return { 
+    tasks: filteredTasks, 
+    allTasks: tasks, 
+    loading, 
+    createTask, 
+    updateTask, 
+    deleteTask, 
+    addComment 
   };
-
-  const moveTask = async (taskId, newStatus) => {
-    if (!isFirebaseConfigured) {
-      const task = tasks.find(t => t.id === taskId);
-      if (task) {
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-      }
-      toast.success(`Movido para ${newStatus}`);
-      return;
-    }
-
-    try {
-      await updateDoc(doc(db, 'tasks', taskId), { status: newStatus });
-      toast.success(`Movido para ${newStatus}`);
-    } catch (e) {
-      toast.error('Erro ao mover tarefa');
-    }
-  };
-
-  const applyTemplate = async (templateId, clientId, clientName) => {
-    const TEMPLATES = {
-      'social-media': [
-        { title: 'Planejamento Mensal', tag: 'Social Media', estimated_hours: 4, status: 'backlog', checklist: [{label: 'Aprovar pauta', is_done: false}] },
-        { title: 'Design - 8 Posts', tag: 'Design', estimated_hours: 12, status: 'backlog', checklist: [{label: 'Aprovar artes', is_done: false}] },
-        { title: 'Agendamento e Legendas', tag: 'Social Media', estimated_hours: 4, status: 'backlog', checklist: [{label: 'Agendar posts', is_done: false}] }
-      ],
-      'onboarding': [
-        { title: 'Reunião Kickoff', tag: 'Atendimento', estimated_hours: 2, status: 'backlog', checklist: [] },
-        { title: 'Setup de Contas', tag: 'Performance', estimated_hours: 3, status: 'backlog', checklist: [{label: 'Acesso Meta', is_done: false}, {label: 'Acesso Google', is_done: false}] },
-        { title: 'Criação do Brandbook', tag: 'Branding', estimated_hours: 15, status: 'backlog', checklist: [{label: 'Aprovação de Cores', is_done: false}] }
-      ]
-    };
-
-    const templateTasks = TEMPLATES[templateId];
-    if (!templateTasks) return;
-
-    for (const t of templateTasks) {
-      await createTask({
-        title: t.title,
-        client_id: clientId,
-        client_name: clientName,
-        tag: t.tag,
-        estimated_hours: t.estimated_hours,
-        status: t.status,
-        deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        checklist: t.checklist
-      });
-    }
-    toast.success('Template aplicado!');
-  };
-
-  return { tasks, loading, error, updateTask, createTask, addComment, toggleChecklist, moveTask, applyTemplate, refetch: () => {} };
 }

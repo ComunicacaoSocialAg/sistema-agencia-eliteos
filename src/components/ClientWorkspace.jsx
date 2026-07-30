@@ -27,7 +27,8 @@ import {
   Sparkles,
   Copy,
   Trash2,
-  Rocket
+  Rocket,
+  Shield
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -84,6 +85,7 @@ import MeetingMinutes from './MeetingMinutes';
 import OnboardingModule from './OnboardingModule';
 import AIBrainModule from './AIBrainModule';
 import ClientConfigModal from './ClientConfigModal';
+import GovernanceModule from './GovernanceModule';
 import { reportei } from '../lib/reportei';
 
 export default function ClientWorkspace({ client: initialClient, onBack, viewMode = 'internal', onUpdateClient }) {
@@ -158,6 +160,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     ...(!isPortal ? [{ id: 'brain', label: 'Cérebro IA', icon: Bot }] : []),
     ...(!isPortal ? [{ id: 'profitability', label: 'Rentabilidade', icon: CircleDollarSign }] : []),
     ...(!isPortal ? [{ id: 'onboarding', label: 'Onboarding', icon: Rocket }] : []),
+    ...(!isPortal ? [{ id: 'governance', label: 'Governança & Ritos', icon: Shield }] : []),
   ];
 
   return (
@@ -258,6 +261,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         {activeTab === 'brain' && !isPortal && <AIBrainModule client={client} />}
         {activeTab === 'profitability' && <ProfitabilityTab client={client} tasks={tasks} />}
         {activeTab === 'onboarding' && !isPortal && <OnboardingModule client={client} onUpdateClient={handleUpdateClient} />}
+        {activeTab === 'governance' && !isPortal && <GovernanceModule client={client} />}
       </div>
 
       {showConfigModal && (
