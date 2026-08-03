@@ -76,52 +76,49 @@ export function AuthProvider({ children }) {
       if (data) {
         setProfile(data);
       } else {
-        // Perfil não encontrado no banco → criar um admin de emergência na memória
-        console.warn('[Auth] Perfil não encontrado. Modo Admin emergencial.');
-        setProfile({
-          id: userId,
-          name: email?.split('@')[0] || 'Admin',
-          role: 'admin',
-          roleTitle: 'Administrador',
-        });
+        // Perfil não encontrado no banco → NÃO conceder admin automaticamente.
+        // Um usuário autenticado sem linha em `profiles` é um estado de erro
+        // (cadastro incompleto, falha de sincronização), não motivo para
+        // escalar privilégio. Fica sem role até um admin de verdade resolver.
+        console.error('[Auth] Perfil não encontrado para o usuário. Acesso negado por padrão.');
+        setProfile(null);
+        setUser(null);
+        await supabase.auth.signOut();
       }
     } catch (e) {
       console.error('[Auth] Erro ao carregar perfil:', e);
-      setProfile({
-        id: userId,
-        name: email?.split('@')[0] || 'Admin',
-        role: 'admin',
-        roleTitle: 'Administrador',
-      });
+      setProfile(null);
+      setUser(null);
     }
   }
 
   async function signIn(email, password) {
-    // SEMPRE permitir login demo se a senha for demo123 ou se estivermos em modo fallback
-    const isDemoEmail = !!DEMO_USERS[email.toLowerCase()];
-    const isDemoPassword = password === 'demo123';
+    // Login demo só é permitido quando NÃO há Supabase real disponível
+    // (sem configuração ou em fallback por indisponibilidade). Nunca como
+    // atalho paralelo quando a autenticação real está ativa — isso era um
+    // backdoor: qualquer pessoa com email+senha demo entrava como admin
+    // mesmo em produção com Supabase configurado e saudável.
+    const isRealAuthUnavailable = fallbackToDemo || !isSupabaseConfigured;
 
-    if (fallbackToDemo || !isSupabaseConfigured || (isDemoEmail && isDemoPassword)) {
+    if (isRealAuthUnavailable) {
       const demoUser = DEMO_USERS[email.toLowerCase()];
-      if (demoUser && (isDemoPassword || !isSupabaseConfigured)) {
+      const isDemoPassword = password === 'demo123';
+      if (demoUser && isDemoPassword) {
         setUser(demoUser);
         setProfile(demoUser);
-        console.log('[Auth] Login Demo bem-sucedido:', email);
+        console.log('[Auth] Login Demo bem-sucedido (Supabase indisponível):', email);
         return { error: null };
       }
+      return { error: { message: 'Credenciais de demonstração inválidas.' } };
     }
 
-    // Modo Supabase real (se não for demo ou senha demo errada)
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        return { data, error };
-      } catch (err) {
-        return { error: err };
-      }
+    // Modo Supabase real (único caminho quando a autenticação está disponível)
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      return { data, error };
+    } catch (err) {
+      return { error: err };
     }
-
-    return { error: { message: 'Serviço de autenticação indisponível no momento.' } };
   }
 
   async function sendPasswordResetEmail(email) {
@@ -270,13 +267,16 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {
+    // Sem AuthProvider por perto: não há motivo para conceder admin por
+    // padrão. Retorna estado "deslogado" — mesmo padrão fail-closed do
+    // resto do arquivo.
     return {
       user: null,
       profile: null,
-      role: 'admin',
+      role: null,
       loading: false,
       isDemoMode: true,
-      signIn: async () => ({ error: null }),
+      signIn: async () => ({ error: { message: 'AuthProvider não encontrado.' } }),
       signOut: () => {},
       isRecoveringPassword: false,
     };

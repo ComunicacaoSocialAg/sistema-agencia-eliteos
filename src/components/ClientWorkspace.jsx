@@ -1064,6 +1064,15 @@ function ProfitabilityTab({ client, tasks = [] }) {
   );
 }
 
+// ATENÇÃO: isto NÃO é criptografia. É ofuscação reversível (base64 + string
+// invertida, sem chave). Qualquer pessoa com acesso à linha no banco decodifica
+// em uma linha de código. Serve apenas para não deixar a senha em texto puro
+// visível "a olho nu" em um dump — não protege contra vazamento de dados real.
+// Para proteger de verdade as credenciais dos clientes no client_vault, isso
+// precisa migrar para criptografia do lado do servidor (ex: extensão pgsodium
+// do Supabase, ou uma Edge Function que criptografa/descriptografa usando uma
+// chave que nunca chega ao frontend). Enquanto isso não acontece, trate este
+// vault como texto praticamente plano protegido só pela RLS da tabela.
 function encryptSecret(str) {
   if (!str) return '';
   return 'ENC:' + btoa(encodeURIComponent(str).split('').reverse().join(''));

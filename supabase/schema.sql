@@ -314,6 +314,10 @@ alter table invoices enable row level security;
 alter table whatsapp_logs enable row level security;
 alter table ai_conversations enable row level security;
 alter table ai_memories enable row level security;
+alter table task_attachments enable row level security;
+alter table task_templates enable row level security;
+alter table recurring_tasks enable row level security;
+alter table audit_logs enable row level security;
 
 -- ---- AGÊNCIA (Admin + Commercial + Production) ----
 create policy "Agency full access team_members" on team_members for all using (auth.uid() in (select id from profiles where role in ('admin', 'commercial', 'production')));
@@ -343,7 +347,25 @@ create policy "Client insert own vault" on client_vault for insert with check (c
 
 -- ---- IA (cada usuário gerencia suas próprias conversas) ----
 create policy "Users manage own ai conversations" on ai_conversations for all using (user_id = auth.uid());
-create policy "Users manage own ai memories" on ai_memories for all using (true);
+
+-- ai_memories estava com "using (true)" — liberava leitura/escrita da memória
+-- de IA de QUALQUER cliente para qualquer usuário autenticado. Corrigido para
+-- seguir o mesmo padrão de escopo por client_id usado no resto do schema.
+create policy "Agency full access ai_memories" on ai_memories for all using (auth.uid() in (select id from profiles where role in ('admin', 'commercial', 'production')));
+create policy "Client view own ai_memories" on ai_memories for select using (client_id = (select client_id from profiles where id = auth.uid()));
+
+-- ---- TABELAS SEM POLÍTICA (estavam com RLS desabilitado / totalmente expostas) ----
+create policy "Agency full access task_attachments" on task_attachments for all using (auth.uid() in (select id from profiles where role in ('admin', 'commercial', 'production')));
+create policy "Client view own task_attachments" on task_attachments for select using (task_id in (select id from tasks where client_id = (select client_id from profiles where id = auth.uid())));
+
+create policy "Agency full access task_templates" on task_templates for all using (auth.uid() in (select id from profiles where role in ('admin', 'commercial', 'production')));
+
+create policy "Agency full access recurring_tasks" on recurring_tasks for all using (auth.uid() in (select id from profiles where role in ('admin', 'commercial', 'production')));
+
+-- audit_logs: leitura restrita a admin (histórico sensível de mudanças);
+-- a escrita continua acontecendo via trigger (log_changes), que roda com
+-- privilégio de dono de tabela e não é afetada pela política de RLS.
+create policy "Admin read audit_logs" on audit_logs for select using (auth.uid() in (select id from profiles where role = 'admin'));
 
 -- ============================================================
 -- 17. ÍNDICES DE PERFORMANCE (Junho/2026 — Suporte a Alta Volumetria)
