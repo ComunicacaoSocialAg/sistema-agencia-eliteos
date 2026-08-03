@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Send, Bot, Loader2, Maximize2, Minimize2, ChevronDown, Mic, MicOff } from 'lucide-react';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { chatWithAgent, isAIConfigured } from '../lib/gemini';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { cn } from '../utils/cn';
 
 const MODULE_CONFIGS = {
@@ -369,47 +370,22 @@ function getQuickPrompts(module) {
   ];
 }
 
-// Custom chat function with override system prompt supporting dynamic provider selection
+// Chat function com system prompt customizado, chamando a Edge Function
+// `ai-chat` (o servidor decide Gemini vs OpenAI e guarda as chaves).
+// Antes, esta função importava @google/generative-ai e lia
+// VITE_GEMINI_API_KEY direto no navegador — era uma segunda chave
+// exposta no bundle, fora do módulo lib/gemini.js. Removido.
 async function chatWithAgentWithSystemPrompt(systemPrompt, history, userMessage, provider = 'auto') {
-  const { chatWithOpenAI, isOpenAIConfigured } = await import('../lib/openai');
-  const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-  let activeProvider = 'gemini';
-  if (provider === 'gpt' && isOpenAIConfigured) {
-    activeProvider = 'openai';
-  } else if (provider === 'auto') {
-    activeProvider = geminiKey ? 'gemini' : (isOpenAIConfigured ? 'openai' : 'gemini');
+  if (!isSupabaseConfigured) {
+    throw new Error('Serviço de IA indisponível. Supabase não configurado.');
   }
 
-  if (activeProvider === 'openai') {
-    try {
-      const response = await chatWithOpenAI(systemPrompt, history, userMessage);
-      return { text: response.text };
-    } catch (err) {
-      if (geminiKey) {
-        console.warn('[AIAssistant] Falha no OpenAI. Ativando fallback para o Gemini:', err.message);
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  if (!geminiKey) throw new Error('Serviço de IA indisponível. Verifique as configurações das chaves de API.');
-
-  const { GoogleGenerativeAI } = await import('@google/generative-ai');
-  const genAI = new GoogleGenerativeAI(geminiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-flash-latest',
-    systemInstruction: systemPrompt,
+  const { data, error } = await supabase.functions.invoke('ai-chat', {
+    body: { systemPrompt, conversationHistory: history, userMessage, preferredProvider: provider },
   });
 
-  const chat = model.startChat({
-    history: history.map(m => ({
-      role: m.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: m.text || '' }],
-    })),
-  });
+  if (error) throw new Error(error.message || 'Falha ao chamar a IA.');
+  if (data?.error) throw new Error(data.error);
 
-  const result = await chat.sendMessage(userMessage);
-  return { text: result.response.text() };
+  return { text: data.text };
 }

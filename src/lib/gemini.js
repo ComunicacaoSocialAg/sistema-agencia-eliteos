@@ -1,24 +1,22 @@
 // ============================================================
 // CS Ag OS — Hub de Inteligência Artificial Unificado
 // Prioridade: Gemini (gratuito) → OpenAI GPT-4o-mini (fallback)
+//
+// As chaves de API NÃO ficam mais aqui. Antes elas eram lidas via
+// VITE_GEMINI_API_KEY / VITE_OPENAI_API_KEY e iam parar no bundle JS
+// público — qualquer pessoa conseguia extrair pelo DevTools. Agora
+// toda chamada passa pela Edge Function `ai-chat`, que guarda as
+// chaves como secret no servidor e exige um usuário autenticado.
 // ============================================================
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { chatWithOpenAI, isOpenAIConfigured } from './openai';
+import { supabase, isSupabaseConfigured } from './supabase';
 
-const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-if (!geminiKey && !isOpenAIConfigured) {
-  console.warn(
-    '[CS Ag OS] Nenhuma IA configurada. ' +
-    'Adicione VITE_GEMINI_API_KEY e/ou VITE_OPENAI_API_KEY no .env'
-  );
-}
-
-export const isGeminiConfigured = !!geminiKey;
-export const isAIConfigured = !!geminiKey || isOpenAIConfigured;
-
-const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
+// "Configurado" agora depende só do Supabase estar disponível — é ele
+// quem decide, do lado do servidor, se Gemini e/ou OpenAI estão
+// disponíveis. Sem Supabase, não tem como chamar a Edge Function.
+export const isGeminiConfigured = isSupabaseConfigured;
+export const isOpenAIConfigured = isSupabaseConfigured;
+export const isAIConfigured = isSupabaseConfigured;
 
 // Sistema de contexto da agência injetado em todos os agentes
 const AGENCY_CONTEXT = `
@@ -59,51 +57,24 @@ Aqui está o fluxo para a campanha:
 };
 
 /**
- * Hub unificado: tenta Gemini primeiro, fallback para OpenAI.
+ * Hub unificado: chama a Edge Function `ai-chat`, que decide no servidor
+ * se usa Gemini ou OpenAI (fallback automático já acontece lá dentro).
  */
 export async function chatWithAgent(agentId, conversationHistory, userMessage, preferredProvider = 'auto') {
+  if (!isSupabaseConfigured) {
+    throw new Error('IA indisponível: Supabase não configurado (a Edge Function de IA depende dele).');
+  }
+
   const systemPrompt = AGENT_CONTEXTS[agentId] || AGENCY_CONTEXT;
 
-  // Estratégia 1: Gemini (gratuito, prioridade)
-  if (genAI && (preferredProvider === 'auto' || preferredProvider === 'gemini')) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
-        systemInstruction: systemPrompt,
-      });
+  const { data, error } = await supabase.functions.invoke('ai-chat', {
+    body: { systemPrompt, conversationHistory, userMessage, preferredProvider },
+  });
 
-      const chat = model.startChat({
-        history: conversationHistory.map(msg => ({
-          role: msg.role === 'ai' ? 'model' : 'user',
-          parts: [{ text: msg.text || '' }],
-        })),
-      });
+  if (error) throw new Error(error.message || 'Falha ao chamar a IA.');
+  if (data?.error) throw new Error(data.error);
 
-      const result = await chat.sendMessage(userMessage);
-      const text = result.response.text();
-
-      return parseAgentResponse(agentId, text, 'gemini');
-    } catch (geminiError) {
-      if (preferredProvider === 'gemini') {
-        throw new Error(`Gemini indisponível: ${geminiError.message}`);
-      }
-      console.warn('[AI Hub] Gemini falhou, tentando OpenAI...', geminiError.message);
-      // Fall through to OpenAI
-    }
-  }
-
-  // Estratégia 2: OpenAI (fallback pago ou forçado)
-  if (isOpenAIConfigured && (preferredProvider === 'auto' || preferredProvider === 'gpt')) {
-    try {
-      const result = await chatWithOpenAI(systemPrompt, conversationHistory, userMessage);
-      return parseAgentResponse(agentId, result.text, 'openai');
-    } catch (openAIError) {
-      console.error('[AI Hub] OpenAI falhou:', openAIError.message);
-      throw openAIError;
-    }
-  }
-
-  throw new Error('Nenhuma IA configurada ou o provedor selecionado não está disponível.');
+  return parseAgentResponse(agentId, data.text, data.provider);
 }
 
 /**
@@ -130,4 +101,3 @@ export async function generateContent(prompt) {
   const res = await chatWithAgent('brief', [], prompt);
   return res.text;
 }
-

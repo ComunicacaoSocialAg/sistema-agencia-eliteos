@@ -116,24 +116,64 @@ export default function FinanceView() {
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
   // Projeção de Fluxo de Caixa (Próximos 3 meses)
+  // ATENÇÃO: "entrada" assume 10% de crescimento ao mês — é uma premissa
+  // otimista fixa, não uma previsão baseada em dado histórico (o sistema
+  // ainda não guarda série histórica de MRR mês a mês). "saida" assume
+  // 60% do MRR como custo — mesma limitação. Tratar como cenário
+  // ilustrativo, não como número pra decisão de caixa.
   const cashFlowProjection = useMemo(() => {
     const months = [0, 1, 2];
     return months.map(m => {
       const date = addMonths(new Date(), m);
       return {
         month: format(date, 'MMM', { locale: ptBR }),
-        entrada: mrr * (1 + (m * 0.1)), // Projeção otimista de 10% crescimento
+        entrada: mrr * (1 + (m * 0.1)),
         saida: (mrr * 0.6)
       };
     });
   }, [mrr]);
 
-  const overdueCount = invoices.filter(i => i.status === 'overdue').length;
+  // Custo operacional REAL disponível hoje: soma do custo de horas
+  // trabalhadas por toda a equipe (tracked_seconds × hourly_cost),
+  // que é o mesmo dado usado no gráfico de Lucratividade por Cliente.
+  // Isso NÃO inclui despesas fixas (aluguel, software, folha administrativa)
+  // nem impostos — o sistema ainda não tem uma tabela pra isso. Antes,
+  // esses dois valores eram fixos no código (R$ 24.500 e R$ 4.200),
+  // sempre iguais independente do mês ou do cliente — número inventado
+  // apresentado como se fosse dado real.
+  const laborCost = useMemo(
+    () => (profitability || []).reduce((sum, p) => sum + (p.costHours || 0), 0),
+    [profitability]
+  );
   const grossRevenue = totalPipeline;
-  const expenses = 24500;
-  const taxes = 4200;
-  const netProfit = grossRevenue - expenses - taxes;
-  const margin = grossRevenue > 0 ? ((netProfit / grossRevenue) * 100).toFixed(1) : '0.0';
+  const operatingProfit = grossRevenue - laborCost;
+  const operatingMargin = grossRevenue > 0 ? ((operatingProfit / grossRevenue) * 100).toFixed(1) : '0.0';
+
+  // Crescimento de MRR mês atual vs mês anterior, a partir de faturas
+  // realmente pagas (paid_at), em vez do badge fixo "+12%" que antes
+  // aparecia sempre, em qualquer mês, com ou sem dado.
+  const mrrGrowth = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const prevDate = new Date(currentYear, currentMonth - 1, 1);
+
+    const sumPaidInMonth = (month, year) => invoices
+      .filter(i => {
+        if (i.status !== 'paid' || !i.paid_at) return false;
+        const d = new Date(i.paid_at);
+        return d.getMonth() === month && d.getFullYear() === year;
+      })
+      .reduce((sum, i) => sum + (i.amount || 0), 0);
+
+    const current = sumPaidInMonth(currentMonth, currentYear);
+    const previous = sumPaidInMonth(prevDate.getMonth(), prevDate.getFullYear());
+
+    if (previous === 0) return null; // sem base de comparação real — não inventar número
+    return ((current - previous) / previous) * 100;
+  }, [invoices]);
+
+  const overdueCount = invoices.filter(i => i.status === 'overdue').length;
 
   return (
     <div className="h-full flex flex-col bg-cs-bg p-8 overflow-y-auto custom-scrollbar">
@@ -157,16 +197,22 @@ export default function FinanceView() {
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">MRR Atual</p>
           <div className="text-xl font-bold text-white">{formatCurrency(mrr)}</div>
-          <div className="flex items-center gap-1 text-[10px] text-green-400 mt-2 font-bold">
-            <ArrowUpRight size={12} /> +12% vs mês anterior
-          </div>
+          {mrrGrowth === null ? (
+            <div className="text-[10px] text-cs-text-secondary mt-2">Sem faturamento pago no mês anterior para comparar</div>
+          ) : (
+            <div className={cn("flex items-center gap-1 text-[10px] mt-2 font-bold", mrrGrowth >= 0 ? "text-green-400" : "text-red-400")}>
+              {mrrGrowth >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+              {mrrGrowth >= 0 ? '+' : ''}{mrrGrowth.toFixed(1)}% vs mês anterior
+            </div>
+          )}
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
-          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Margem Líquida</p>
-          <div className="text-xl font-bold text-white">{margin}%</div>
+          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Margem Operacional</p>
+          <div className="text-xl font-bold text-white">{operatingMargin}%</div>
           <div className="w-full bg-cs-bg h-1 rounded-full mt-3 overflow-hidden">
-            <div className="bg-cs-primary h-full" style={{ width: `${margin}%` }}></div>
+            <div className="bg-cs-primary h-full" style={{ width: `${Math.max(0, Math.min(100, operatingMargin))}%` }}></div>
           </div>
+          <div className="text-[9px] text-cs-text-secondary mt-2">Receita − custo de horas da equipe (não inclui despesas fixas nem impostos)</div>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Inadimplência</p>
@@ -174,11 +220,12 @@ export default function FinanceView() {
           <div className="text-[10px] text-cs-text-secondary mt-2">{overdueCount} faturas em aberto</div>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
-          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Custo Operacional</p>
-          <div className="text-xl font-bold text-white">{formatCurrency(expenses)}</div>
-          <div className="text-[10px] text-cs-text-secondary mt-2">Fixo + Variáveis</div>
+          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Custo de Equipe</p>
+          <div className="text-xl font-bold text-white">{formatCurrency(laborCost)}</div>
+          <div className="text-[10px] text-cs-text-secondary mt-2">Horas rastreadas × custo/hora — não inclui despesas fixas</div>
         </div>
       </div>
+
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
         {/* Profitability Bar Chart */}

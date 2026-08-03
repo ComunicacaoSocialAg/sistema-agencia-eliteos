@@ -64,7 +64,7 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
 
   const handleGenerateCopy = async () => {
     if (!isAIConfigured) {
-      alert('Nenhuma IA configurada. Adicione VITE_GEMINI_API_KEY ou VITE_OPENAI_API_KEY no .env');
+      alert('Nenhuma IA configurada. Configure GEMINI_API_KEY ou OPENAI_API_KEY via "supabase secrets set" (servidor, não .env do frontend)');
       return;
     }
     setIsGenerating(true);

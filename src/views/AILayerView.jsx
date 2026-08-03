@@ -193,7 +193,7 @@ export default function AILayerView() {
             <div className="flex items-start gap-2">
               <AlertCircle size={14} className="text-yellow-500 mt-0.5 shrink-0" />
               <p className="text-xs text-yellow-400">
-                Nenhuma IA configurada. Adicione <code className="bg-black/20 px-1 rounded">VITE_GEMINI_API_KEY</code> ou <code className="bg-black/20 px-1 rounded">VITE_OPENAI_API_KEY</code> no .env
+                Nenhuma IA configurada. Configure <code className="bg-black/20 px-1 rounded">GEMINI_API_KEY</code> ou <code className="bg-black/20 px-1 rounded">OPENAI_API_KEY</code> via <code className="bg-black/20 px-1 rounded">supabase secrets set</code> (servidor, não .env do frontend)
               </p>
             </div>
           </div>
