@@ -477,11 +477,11 @@ Retorne estritamente um JSON no seguinte formato:
             <div className="p-4 bg-cs-bg rounded-2xl border border-cs-border space-y-3">
               <div className="flex justify-between items-center text-xs text-cs-text-secondary">
                 <span>Instagram Business:</span>
-                <span className="text-white font-bold">{briefing.social_instagram || '@pontocor_oficial'}</span>
+                <span className="text-white font-bold">{briefing.social_instagram || '@dubola_molhos'}</span>
               </div>
               <div className="flex justify-between items-center text-xs text-cs-text-secondary">
                 <span>Website Principal:</span>
-                <span className="text-white font-bold">{briefing.social_website || 'pontocor.com.br'}</span>
+                <span className="text-white font-bold">{briefing.social_website || 'dubola.com.br'}</span>
               </div>
             </div>
           </div>

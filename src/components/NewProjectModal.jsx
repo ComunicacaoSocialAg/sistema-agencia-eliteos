@@ -159,7 +159,7 @@ function StepDetails({ form, setForm, clients, selectedType }) {
 // ─── Passo 3: Template de Tarefas ─────────────────────────────────────────────
 function StepTasks({ tasks, setTasks, startDate }) {
   const TAGS = ['Social Media', 'Branding', 'Vídeo', 'Web', 'Campanha'];
-  const MEMBERS = ['Bruno', 'Carlos', 'Ana'];
+  const MEMBERS = ['Bruno'];
 
   const addTask = () => {
     setTasks(prev => [...prev, {

@@ -14,16 +14,16 @@ export default function MeetingMinutes({ clientId }) {
   const [minutes, setMinutes] = useState([
     {
       id: 1,
-      title: 'Alinhamento Mensal - Estratégia Outono',
-      date: '2024-05-02',
-      participants: ['Bruno (Agência)', 'Ana (Ponto Cor)'],
-      summary: 'Revisão dos resultados de Abril e planejamento da campanha de Dia dos Namorados.',
+      title: 'Alinhamento Estratégico - Calendário Trimestral',
+      date: '2026-03-05',
+      participants: ['Bruno (Agência)', 'Roberto (Dubola)'],
+      summary: 'Revisão das entregas do mês e planejamento das campanhas de lançamentos gastronômicos e e-commerce.',
       decisions: [
-        'Aumentar verba em 15% no Meta Ads',
-        'Focar em Reels para o público jovem',
-        'Novo ensaio fotográfico dia 15/05'
+        'Aumentar foco em Reels de receitas com os molhos',
+        'Priorizar campanhas de tráfego para cidades de SP e MG',
+        'Ajustar fotos de alta definição das novas embalagens'
       ],
-      nextSteps: ['Criar Campanha Meta', 'Agendar Fotógrafo']
+      nextSteps: ['Aprovar Criativos no Portal', 'Subir Campanhas no Meta Ads']
     }
   ]);
 

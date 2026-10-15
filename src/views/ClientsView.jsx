@@ -29,6 +29,8 @@ import { useDeals } from '../hooks/useDeals';
 import { cn } from '../utils/cn';
 import ClientWorkspace from '../components/ClientWorkspace';
 import NewProjectModal from '../components/NewProjectModal';
+import ReviewCenterHub from '../components/ReviewCenterHub';
+import { useAllDeliverables } from '../hooks/useDeliverables';
 import { createClientFolderStructure, createProjectFolder, createProposalFolder } from '../lib/googleDrive';
 
 const STATUS_COLORS = {
@@ -57,7 +59,7 @@ const PROJECT_STATUS_LABELS = {
   'concluido': 'CONCLUÍDO',
 };
 
-function ClientCard({ client, onClick, score }) {
+function ClientCard({ client, onClick, onOpenReview, score, pendingReviewsCount = 0 }) {
   return (
     <div 
       onClick={onClick}
@@ -87,14 +89,40 @@ function ClientCard({ client, onClick, score }) {
         <h3 className="text-lg font-bold text-white group-hover:text-cs-primary transition-colors truncate">{client.name}</h3>
         <p className="text-xs text-cs-text-secondary mb-4 truncate">{client.contact_name || 'Sem contato'}</p>
         
-        <div className="flex items-center justify-between pt-4 border-t border-cs-border/50">
+        <div className="flex items-center justify-between pt-4 border-t border-cs-border/50 gap-2">
           <div>
             <p className="text-[9px] text-cs-text-secondary font-bold uppercase tracking-widest">Fee Mensal</p>
             <p className="text-sm font-bold text-white">R$ {client.monthly_fee?.toLocaleString()}</p>
           </div>
-          <button className="p-2 bg-cs-bg rounded-lg text-cs-text-secondary group-hover:text-cs-primary transition-colors border border-cs-border group-hover:border-cs-primary/30">
-            <ExternalLink size={14} />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onOpenReview(); }}
+              className={cn(
+                "px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 border cursor-pointer",
+                pendingReviewsCount > 0 
+                  ? "bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20" 
+                  : "bg-cs-bg text-cs-text-secondary border-cs-border hover:text-white hover:border-cs-primary/40"
+              )}
+              title="Abrir Review Center e aprovações deste cliente"
+            >
+              <CheckCircle2 size={12} className={pendingReviewsCount > 0 ? "text-orange-400 animate-pulse" : "text-cs-primary"} />
+              Review
+              {pendingReviewsCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-orange-500 text-black text-[9px] font-black flex items-center justify-center">
+                  {pendingReviewsCount}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={onClick}
+              className="p-2 bg-cs-bg rounded-lg text-cs-text-secondary group-hover:text-cs-primary transition-colors border border-cs-border group-hover:border-cs-primary/30 cursor-pointer"
+              title="Abrir workspace do cliente"
+            >
+              <ExternalLink size={14} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -348,19 +376,23 @@ function NewClientModal({ onClose, onSave }) {
 export default function ClientsView() {
   const { clients, loading: clientsLoading, totalMRR, createClient, updateClient } = useClients();
   const { projects, loading: projectsLoading, createProject, updateProject, deleteProject } = useProjects();
-  const { createTask } = useTasks();
+  const { tasks, createTask } = useTasks();
+  const { deliverables } = useAllDeliverables();
   const { createDeal } = useDeals();
   
   const { healthScores, capacity } = useIntelligence();
   const { setContext } = useAIAssistant();
   
-  const [viewTab, setViewTab] = useState('clients'); // 'clients' | 'projects'
+  const [viewTab, setViewTab] = useState('clients'); // 'clients' | 'projects' | 'review'
   const [projectViewMode, setProjectViewMode] = useState('grid'); // 'grid' | 'list' | 'kanban'
   const [search, setSearch] = useState('');
   
   const [showNewClientModal, setShowNewClientModal] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [clientInitialTab, setClientInitialTab] = useState('overview');
+
+  const pendingDeliverables = (deliverables || []).filter(d => d.status === 'pendente');
 
   useEffect(() => {
     setContext({
@@ -371,9 +403,10 @@ export default function ClientsView() {
         clientes_ativos: clients.filter(c => c.status === 'active').length,
         mrr_total: totalMRR,
         total_projetos: projects.length,
+        pendentes_review: pendingDeliverables.length,
       },
     });
-  }, [clients, totalMRR, projects, setContext]);
+  }, [clients, totalMRR, projects, pendingDeliverables.length, setContext]);
 
   // Filter clients
   const filteredClients = clients.filter(c =>
@@ -487,7 +520,8 @@ export default function ClientsView() {
     return (
       <ClientWorkspace 
         client={selectedClient} 
-        onBack={() => setSelectedClient(null)} 
+        initialTab={clientInitialTab}
+        onBack={() => { setSelectedClient(null); setClientInitialTab('overview'); }} 
         onUpdateClient={updateClient}
       />
     );
@@ -517,7 +551,9 @@ export default function ClientsView() {
             <p className="text-sm text-cs-text-secondary">
               {viewTab === 'clients' 
                 ? `${clients.filter(c => c.status === 'active').length} contas sob gestão ativa.`
-                : `${projects.filter(p => p.status === 'em-andamento').length} projetos ativos em andamento.`
+                : viewTab === 'projects'
+                ? `${projects.filter(p => p.status === 'em-andamento').length} projetos ativos em andamento.`
+                : `${pendingDeliverables.length} peças aguardando aprovação ou validação do cliente.`
               }
             </p>
           </div>
@@ -552,7 +588,7 @@ export default function ClientsView() {
               viewTab === 'clients' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
             )}
           >
-            <Users size={14} /> Clientes
+            <Users size={14} /> Clientes ({clients.length})
           </button>
           <button
             onClick={() => { setViewTab('projects'); setSearch(''); }}
@@ -561,7 +597,26 @@ export default function ClientsView() {
               viewTab === 'projects' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
             )}
           >
-            <Folder size={14} /> Projetos
+            <Folder size={14} /> Projetos ({projects.length})
+          </button>
+          <button
+            onClick={() => { setViewTab('review'); setSearch(''); }}
+            className={cn(
+              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer relative",
+              viewTab === 'review' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
+            )}
+          >
+            <CheckCircle2 size={14} className={pendingDeliverables.length > 0 ? "text-orange-400 animate-pulse" : "text-cs-primary"} /> 
+            Review Center
+            {pendingDeliverables.length > 0 ? (
+              <span className="px-1.5 py-0.5 bg-orange-500 text-black text-[10px] font-black rounded-full shadow-sm">
+                {pendingDeliverables.length}
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 bg-cs-surface border border-cs-border text-cs-text-secondary text-[10px] font-bold rounded-full">
+                {deliverables.length}
+              </span>
+            )}
           </button>
         </div>
 
@@ -638,31 +693,58 @@ export default function ClientsView() {
           </div>
         )}
 
-        {/* Search */}
-        <div className="relative mb-8">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-cs-text-secondary" />
-          <input 
-            type="text" 
-            value={search} 
-            onChange={e => setSearch(e.target.value)}
-            placeholder={viewTab === 'clients' ? "Filtrar por nome do cliente ou contato..." : "Filtrar por nome do projeto ou cliente..."}
-            className="w-full bg-cs-surface border border-cs-border rounded-2xl pl-12 pr-4 py-4 text-sm text-white focus:outline-none focus:border-cs-primary transition-all placeholder:text-cs-text-secondary/50 shadow-inner" 
-          />
-        </div>
+        {/* Search (only for clients and projects tabs) */}
+        {viewTab !== 'review' && (
+          <div className="relative mb-8">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-cs-text-secondary" />
+            <input 
+              type="text" 
+              value={search} 
+              onChange={e => setSearch(e.target.value)}
+              placeholder={viewTab === 'clients' ? "Filtrar por nome do cliente ou contato..." : "Filtrar por nome do projeto ou cliente..."}
+              className="w-full bg-cs-surface border border-cs-border rounded-2xl pl-12 pr-4 py-4 text-sm text-white focus:outline-none focus:border-cs-primary transition-all placeholder:text-cs-text-secondary/50 shadow-inner" 
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 px-8 pb-8">
+        {/* REVIEW CENTER TAB */}
+        {viewTab === 'review' && (
+          <ReviewCenterHub 
+            onOpenClientWorkspace={(client, tab) => {
+              setSelectedClient(client);
+              setClientInitialTab(tab || 'approvals');
+            }}
+          />
+        )}
+
         {/* CLIENTS TAB */}
         {viewTab === 'clients' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredClients.map(client => (
-              <ClientCard 
-                key={client.id} 
-                client={client} 
-                onClick={() => setSelectedClient(client)} 
-                score={healthScores[client.id] || 0}
-              />
-            ))}
+            {filteredClients.map(client => {
+              const clientPendingReviews = (deliverables || []).filter(d => {
+                const task = tasks.find(t => t.id === d.task_id);
+                return (task?.client_id === client.id || task?.client_name === client.name || task?.client?.name === client.name) && d.status === 'pendente';
+              }).length;
+
+              return (
+                <ClientCard 
+                  key={client.id} 
+                  client={client} 
+                  onClick={() => {
+                    setSelectedClient(client);
+                    setClientInitialTab('overview');
+                  }} 
+                  onOpenReview={() => {
+                    setSelectedClient(client);
+                    setClientInitialTab('approvals');
+                  }}
+                  score={healthScores[client.id] || 0}
+                  pendingReviewsCount={clientPendingReviews}
+                />
+              );
+            })}
             {filteredClients.length === 0 && (
               <div className="col-span-full text-center py-24 bg-cs-surface border border-cs-border rounded-3xl border-dashed">
                 <Users size={48} className="mx-auto mb-4 opacity-10" />

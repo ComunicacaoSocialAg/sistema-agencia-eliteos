@@ -31,6 +31,7 @@ import {
 import { useInvoices } from '../hooks/useInvoices';
 import { useProfitability } from '../hooks/useProfitability';
 import { useClients } from '../hooks/useClients';
+import { useActiveClient } from '../contexts/ActiveClientContext';
 import { cn } from '../utils/cn';
 
 function formatDate(dateStr) {
@@ -107,122 +108,122 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
 }
 
 export default function FinanceView() {
+  const { selectedClient, isAllClients, matchesSelectedClient } = useActiveClient();
   const { invoices, mrr, overdue, totalPipeline, createInvoice, updateInvoiceStatus } = useInvoices();
-  const { data: profitability, loading: loadingProfits } = useProfitability();
-  const { clients } = useClients();
+  const { data: profitability = [] } = useProfitability();
+  const { clients = [] } = useClients();
   const [showNewModal, setShowNewModal] = useState(false);
 
   const formatCurrency = (value) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
-  // Projeção de Fluxo de Caixa (Próximos 3 meses)
-  // ATENÇÃO: "entrada" assume 10% de crescimento ao mês — é uma premissa
-  // otimista fixa, não uma previsão baseada em dado histórico (o sistema
-  // ainda não guarda série histórica de MRR mês a mês). "saida" assume
-  // 60% do MRR como custo — mesma limitação. Tratar como cenário
-  // ilustrativo, não como número pra decisão de caixa.
-  const cashFlowProjection = useMemo(() => {
-    const months = [0, 1, 2];
-    return months.map(m => {
-      const date = addMonths(new Date(), m);
-      return {
-        month: format(date, 'MMM', { locale: ptBR }),
-        entrada: mrr * (1 + (m * 0.1)),
-        saida: (mrr * 0.6)
-      };
-    });
-  }, [mrr]);
+  // Filtrar faturas pelo cliente selecionado
+  const displayedInvoices = useMemo(() => {
+    if (isAllClients) return invoices;
+    return invoices.filter(i => matchesSelectedClient(i.client_id) || (i.client && matchesSelectedClient(i.client.id)));
+  }, [invoices, isAllClients, matchesSelectedClient]);
 
-  // Custo operacional REAL disponível hoje: soma do custo de horas
-  // trabalhadas por toda a equipe (tracked_seconds × hourly_cost),
-  // que é o mesmo dado usado no gráfico de Lucratividade por Cliente.
-  // Isso NÃO inclui despesas fixas (aluguel, software, folha administrativa)
-  // nem impostos — o sistema ainda não tem uma tabela pra isso. Antes,
-  // esses dois valores eram fixos no código (R$ 24.500 e R$ 4.200),
-  // sempre iguais independente do mês ou do cliente — número inventado
-  // apresentado como se fosse dado real.
-  const laborCost = useMemo(
-    () => (profitability || []).reduce((sum, p) => sum + (p.costHours || 0), 0),
-    [profitability]
-  );
-  const grossRevenue = totalPipeline;
-  const operatingProfit = grossRevenue - laborCost;
-  const operatingMargin = grossRevenue > 0 ? ((operatingProfit / grossRevenue) * 100).toFixed(1) : '0.0';
+  const clientFee = !isAllClients && selectedClient ? Number(selectedClient.monthly_fee || 0) : mrr;
+  const clientPaid = displayedInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const clientPending = displayedInvoices.filter(i => i.status === 'pending').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const overdueCount = displayedInvoices.filter(i => i.status === 'overdue').length;
+  const displayedOverdue = displayedInvoices.filter(i => i.status === 'overdue').reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
-  // Crescimento de MRR mês atual vs mês anterior, a partir de faturas
-  // realmente pagas (paid_at), em vez do badge fixo "+12%" que antes
-  // aparecia sempre, em qualquer mês, com ou sem dado.
-  const mrrGrowth = useMemo(() => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    const prevDate = new Date(currentYear, currentMonth - 1, 1);
-
-    const sumPaidInMonth = (month, year) => invoices
-      .filter(i => {
-        if (i.status !== 'paid' || !i.paid_at) return false;
-        const d = new Date(i.paid_at);
-        return d.getMonth() === month && d.getFullYear() === year;
-      })
-      .reduce((sum, i) => sum + (i.amount || 0), 0);
-
-    const current = sumPaidInMonth(currentMonth, currentYear);
-    const previous = sumPaidInMonth(prevDate.getMonth(), prevDate.getFullYear());
-
-    if (previous === 0) return null; // sem base de comparação real — não inventar número
-    return ((current - previous) / previous) * 100;
-  }, [invoices]);
-
-  const overdueCount = invoices.filter(i => i.status === 'overdue').length;
+  // Recebíveis reais: faturas não pagas agrupadas por mês de vencimento
+  const receivablesByMonth = useMemo(() => {
+    const groups = {};
+    displayedInvoices
+      .filter(i => i.status !== 'paid' && i.due_date)
+      .forEach(i => {
+        const key = String(i.due_date).slice(0, 7);
+        if (!groups[key]) {
+          let label = key;
+          try { label = format(parseISO(`${key}-01`), 'MMMM yyyy', { locale: ptBR }); } catch { /* mantém a chave */ }
+          groups[key] = { key, label, total: 0, count: 0 };
+        }
+        groups[key].total += Number(i.amount) || 0;
+        groups[key].count += 1;
+      });
+    return Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
+  }, [displayedInvoices]);
 
   return (
     <div className="h-full flex flex-col bg-cs-bg p-8 overflow-y-auto custom-scrollbar">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
           <h2 className="text-3xl font-bold text-white mb-1">Inteligência Financeira</h2>
-          <p className="text-cs-text-secondary">Visibilidade de margem, lucratividade e projeção de caixa.</p>
+          <p className="text-cs-text-secondary text-sm">
+            {selectedClient 
+              ? `Gestão financeira e contratos de: ${selectedClient.name}`
+              : 'Visão consolidada de receitas e faturas da agência'}
+          </p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => setShowNewModal(true)}
-            className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-cs-primary/20 flex items-center gap-2"
+            className="bg-cs-primary hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-1.5"
           >
             <Plus size={16} /> Nova Cobrança
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* Banner de Contrato do Cliente se selecionado */}
+      {!isAllClients && selectedClient && (
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-4 mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-cs-primary/10 border border-cs-primary/30 text-cs-primary flex items-center justify-center font-bold">
+              <Wallet size={20} />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-cs-text-secondary tracking-widest block">Contrato Vigente</span>
+              <h3 className="text-sm font-bold text-white">{selectedClient.name}</h3>
+            </div>
+          </div>
+          <div className="flex items-center gap-6 text-xs">
+            <div>
+              <span className="text-cs-text-secondary block text-[10px]">Fee Mensal Contratado:</span>
+              <strong className="text-white font-mono text-sm">{formatCurrency(selectedClient.monthly_fee)}</strong>
+            </div>
+            <div>
+              <span className="text-cs-text-secondary block text-[10px]">Dia de Vencimento:</span>
+              <strong className="text-white font-mono text-sm">Todo dia {selectedClient.billing_day || '10'}</strong>
+            </div>
+            <div>
+              <span className="text-cs-text-secondary block text-[10px]">Status do Contrato:</span>
+              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold text-[10px] uppercase">
+                {selectedClient.status === 'active' ? 'Ativo' : selectedClient.status}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KPI Cards Reais */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
-          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">MRR Atual</p>
-          <div className="text-xl font-bold text-white">{formatCurrency(mrr)}</div>
-          {mrrGrowth === null ? (
-            <div className="text-[10px] text-cs-text-secondary mt-2">Sem faturamento pago no mês anterior para comparar</div>
-          ) : (
-            <div className={cn("flex items-center gap-1 text-[10px] mt-2 font-bold", mrrGrowth >= 0 ? "text-green-400" : "text-red-400")}>
-              {mrrGrowth >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-              {mrrGrowth >= 0 ? '+' : ''}{mrrGrowth.toFixed(1)}% vs mês anterior
-            </div>
-          )}
+          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">
+            {selectedClient ? 'Fee Mensal Contratado' : 'MRR da Agência'}
+          </p>
+          <div className="text-xl font-bold text-white">{formatCurrency(clientFee)}</div>
+          <div className="flex items-center gap-1 text-[10px] text-green-400 mt-2 font-bold">
+            <CheckCircle2 size={12} /> Contrato formal ativo
+          </div>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
-          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Margem Operacional</p>
-          <div className="text-xl font-bold text-white">{operatingMargin}%</div>
-          <div className="w-full bg-cs-bg h-1 rounded-full mt-3 overflow-hidden">
-            <div className="bg-cs-primary h-full" style={{ width: `${Math.max(0, Math.min(100, operatingMargin))}%` }}></div>
-          </div>
-          <div className="text-[9px] text-cs-text-secondary mt-2">Receita − custo de horas da equipe (não inclui despesas fixas nem impostos)</div>
+          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Total Recebido no Mês</p>
+          <div className="text-xl font-bold text-emerald-400">{formatCurrency(clientPaid)}</div>
+          <div className="text-[10px] text-cs-text-secondary mt-2">Faturas liquidadas</div>
+        </div>
+        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
+          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">A Receber / Pendente</p>
+          <div className="text-xl font-bold text-yellow-400">{formatCurrency(clientPending)}</div>
+          <div className="text-[10px] text-cs-text-secondary mt-2">Vencimentos programados</div>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Inadimplência</p>
-          <div className="text-xl font-bold text-red-400">{formatCurrency(overdue)}</div>
-          <div className="text-[10px] text-cs-text-secondary mt-2">{overdueCount} faturas em aberto</div>
-        </div>
-        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
-          <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Custo de Equipe</p>
-          <div className="text-xl font-bold text-white">{formatCurrency(laborCost)}</div>
-          <div className="text-[10px] text-cs-text-secondary mt-2">Horas rastreadas × custo/hora — não inclui despesas fixas</div>
+          <div className="text-xl font-bold text-red-400">{formatCurrency(displayedOverdue)}</div>
+          <div className="text-[10px] text-cs-text-secondary mt-2">{overdueCount} faturas em atraso</div>
         </div>
       </div>
 
@@ -234,7 +235,10 @@ export default function FinanceView() {
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Target size={20} className="text-cs-primary" /> Lucratividade por Cliente
             </h3>
-            <div className="text-[10px] font-bold text-cs-text-secondary uppercase">Ranking de Margem (%)</div>
+            <div className="text-[10px] font-bold text-cs-text-secondary text-right">
+              Fee contratado menos horas cronometradas no Kanban<br />
+              <span className="text-yellow-400">Custo/hora: R$ 50 padrão [PREENCHER valor real em Gestão]</span>
+            </div>
           </div>
           
           <div className="h-[300px] w-full">
@@ -290,37 +294,29 @@ export default function FinanceView() {
           </div>
         </div>
 
-        {/* Cash Flow Projection */}
+        {/* Recebíveis reais: faturas em aberto agrupadas por mês de vencimento */}
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-            <Wallet size={20} className="text-green-400" /> Projeção de Caixa
+          <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+            <Wallet size={20} className="text-green-400" /> Recebíveis em Aberto
           </h3>
-          <div className="space-y-6">
-            {cashFlowProjection.map((item, i) => (
-              <div key={i} className="bg-cs-bg/50 border border-cs-border rounded-xl p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-xs font-bold text-white uppercase">{item.month} 2026</span>
-                  <div className="flex items-center gap-1 text-[10px] text-green-400 font-bold">
-                    <ArrowUpRight size={12} /> PROJETADO
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+          <p className="text-[11px] text-cs-text-secondary mb-5">Somente faturas emitidas e ainda não pagas.</p>
+          {receivablesByMonth.length === 0 ? (
+            <div className="bg-cs-bg/50 border border-cs-border rounded-xl p-4 text-xs text-cs-text-secondary">
+              Nenhuma fatura em aberto. Emita a cobrança do mês em "Nova Cobrança".
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {receivablesByMonth.map(item => (
+                <div key={item.key} className="bg-cs-bg/50 border border-cs-border rounded-xl p-4 flex justify-between items-center">
                   <div>
-                    <p className="text-[10px] text-cs-text-secondary mb-1">Entradas</p>
-                    <p className="text-sm font-bold text-white">{formatCurrency(item.entrada)}</p>
+                    <span className="text-xs font-bold text-white capitalize block">{item.label}</span>
+                    <span className="text-[10px] text-cs-text-secondary">{item.count} fatura{item.count === 1 ? '' : 's'}</span>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-cs-text-secondary mb-1">Saídas (Est.)</p>
-                    <p className="text-sm font-bold text-red-400">-{formatCurrency(item.saida)}</p>
-                  </div>
+                  <span className="text-sm font-bold text-cs-primary font-mono">{formatCurrency(item.total)}</span>
                 </div>
-                <div className="mt-3 pt-3 border-t border-cs-border flex justify-between items-center">
-                  <span className="text-[10px] text-cs-text-secondary uppercase">Saldo Previsto</span>
-                  <span className="text-sm font-bold text-cs-primary">{formatCurrency(item.entrada - item.saida)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -330,21 +326,26 @@ export default function FinanceView() {
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Calendar size={18} className="text-cs-primary" /> Faturamento Detalhado
           </h3>
-          <span className="text-xs text-cs-text-secondary font-medium">{invoices.length} faturas registradas</span>
+          <span className="text-xs text-cs-text-secondary font-medium">{displayedInvoices.length} faturas encontradas</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] text-cs-text-secondary border-b border-cs-border bg-cs-bg/50 uppercase tracking-widest font-bold">
-                <th className="px-8 py-4">Cliente / Serviço</th>
-                <th className="px-8 py-4">Valor</th>
-                <th className="px-8 py-4">Vencimento</th>
-                <th className="px-8 py-4">Status</th>
-                <th className="px-8 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm divide-y divide-cs-border/50">
-              {invoices.map((invoice) => (
+          {displayedInvoices.length === 0 ? (
+            <div className="p-12 text-center text-xs text-cs-text-secondary">
+              Nenhuma fatura registrada para este cliente ainda. Clique em "Nova Cobrança" para emitir um lançamento.
+            </div>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] text-cs-text-secondary border-b border-cs-border bg-cs-bg/50 uppercase tracking-widest font-bold">
+                  <th className="px-8 py-4">Cliente / Serviço</th>
+                  <th className="px-8 py-4">Valor</th>
+                  <th className="px-8 py-4">Vencimento</th>
+                  <th className="px-8 py-4">Status</th>
+                  <th className="px-8 py-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-cs-border/50">
+                {displayedInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-cs-bg/30 transition-colors group">
                   <td className="px-8 py-5">
                     <div className="font-bold text-white">{invoice.client?.name || invoice.client}</div>
@@ -382,6 +383,7 @@ export default function FinanceView() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
 

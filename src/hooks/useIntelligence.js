@@ -10,21 +10,9 @@ export function useIntelligence() {
 
   const fetchData = useCallback(async () => {
     if (!isSupabaseConfigured) {
-      // Demo Data
-      setHealthScores({
-        '11111111-0000-0000-0000-000000000001': 95,
-        '11111111-0000-0000-0000-000000000002': 65,
-        '11111111-0000-0000-0000-000000000003': 40
-      });
-      setHourMetrics([
-        { name: 'Ponto Cor', contracted: 15, consumed: 8, usage_percent: 53 },
-        { name: 'TechStart', contracted: 20, consumed: 18, usage_percent: 90 }
-      ]);
-      setCapacity([
-        { name: 'Bruno', load7d: 85, tasksCount: 12 },
-        { name: 'Ana', load7d: 45, tasksCount: 5 },
-        { name: 'Carlos', load7d: 70, tasksCount: 8 }
-      ]);
+      setHealthScores({});
+      setHourMetrics([]);
+      setCapacity([]);
       setLoading(false);
       return;
     }

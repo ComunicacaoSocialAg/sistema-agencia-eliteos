@@ -51,7 +51,7 @@ export default function AIBriefingModal({ onClose, onConfirm }) {
                 <textarea 
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  placeholder="Ex: Preciso de uma campanha de posts para o Instagram da Ponto Cor focada no Dia dos Namorados, com tom romântico e foco em revelação de fotos premium..."
+                  placeholder="Ex: Preciso de uma campanha de posts para a Dubola focada na linha de molhos artesanais no e-commerce, com tom gourmet e apetitoso..."
                   rows={6}
                   className="w-full bg-transparent border-none text-white text-lg placeholder:text-cs-text-secondary/30 focus:outline-none resize-none leading-relaxed"
                   autoFocus

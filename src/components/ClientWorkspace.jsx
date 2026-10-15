@@ -86,11 +86,12 @@ import OnboardingModule from './OnboardingModule';
 import AIBrainModule from './AIBrainModule';
 import ClientConfigModal from './ClientConfigModal';
 import GovernanceModule from './GovernanceModule';
+import ApprovalFlow from './ApprovalFlow';
 import { reportei } from '../lib/reportei';
 
-export default function ClientWorkspace({ client: initialClient, onBack, viewMode = 'internal', onUpdateClient }) {
+export default function ClientWorkspace({ client: initialClient, onBack, viewMode = 'internal', onUpdateClient, initialTab = 'overview' }) {
   const [client, setClient] = useState(initialClient);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const isPortal = viewMode === 'portal';
   const { dashboard, loading } = useClientPortal(isPortal ? client.id : null);
   const { setContext } = useAIAssistant();
@@ -103,7 +104,10 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
 
   useEffect(() => {
     setClient(initialClient);
-  }, [initialClient]);
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialClient, initialTab]);
 
   const handleUpdateClient = (updatedClient) => {
     setClient(updatedClient);
@@ -163,6 +167,45 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     ...(!isPortal ? [{ id: 'governance', label: 'Governança & Ritos', icon: Shield }] : []),
   ];
 
+  const handleGenerateWhatsAppReport = () => {
+    const pendingApproval = tasks.filter(t => t.status === 'aguardando-cliente' || t.status === 'aprovacao-cliente');
+    const inProgress = tasks.filter(t => ['em-producao', 'briefing', 'revisao-interna', 'ajustes'].includes(t.status));
+    const done = tasks.filter(t => ['concluido', 'finalizado'].includes(t.status));
+
+    let msg = `*Status Semanal CS Ag | ${client?.name}*\n`;
+    msg += `Olá, ${client?.contact_name || 'equipe'}! Segue o resumo das entregas desta semana:\n\n`;
+
+    if (pendingApproval.length > 0) {
+      msg += `*⏳ Aguardando Sua Aprovação:*\n`;
+      pendingApproval.forEach(t => {
+        msg += `• ${t.title} (Link: ${window.location.origin}/aprovar/${t.id})\n`;
+      });
+      msg += `\n`;
+    }
+
+    if (inProgress.length > 0) {
+      msg += `*🚀 Em Produção / Criação:*\n`;
+      inProgress.forEach(t => {
+        const deadlineStr = t.deadline ? ` (Prazo: ${new Date(t.deadline).toLocaleDateString('pt-BR')})` : '';
+        msg += `• ${t.title}${deadlineStr}\n`;
+      });
+      msg += `\n`;
+    }
+
+    if (done.length > 0) {
+      msg += `*✅ Concluído Recentemente:*\n`;
+      done.slice(0, 5).forEach(t => {
+        msg += `• ${t.title}\n`;
+      });
+      msg += `\n`;
+    }
+
+    msg += `Qualquer ajuste ou nova prioridade, estamos à disposição.\nComunicação Social Ag`;
+
+    navigator.clipboard.writeText(msg);
+    toast.success('Resumo semanal copiado para envio no WhatsApp!');
+  };
+
   return (
     <div className="flex flex-col h-full bg-cs-bg animate-in fade-in slide-in-from-right-4 duration-500">
       {/* Header */}
@@ -201,6 +244,13 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
               </button>
             ) : (
               <>
+                <button 
+                  onClick={handleGenerateWhatsAppReport}
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 shadow-sm"
+                  title="Gerar e copiar resumo semanal formatado para WhatsApp"
+                >
+                  <MessageSquare size={16} /> Relatório WhatsApp
+                </button>
                 <button onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                   <Settings size={16} /> Configurar
                 </button>
@@ -569,53 +619,120 @@ function ProductionTab({ client, tasks = [] }) {
 }
 
 function ApprovalsTab({ client }) {
-  const handleCopyLink = () => {
-    const link = `${window.location.origin}/approve/${client.id}`;
+  const { tasks } = useTasks(client.id);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+
+  const clientTasks = tasks.filter(t => t.client_id === client.id || (t.client && t.client.name === client.name));
+  const activeReviewTasks = clientTasks.filter(t => t.status === 'aguardando-cliente' || t.status === 'revisao-interna' || t.status === 'ajustes');
+  const displayTasks = activeReviewTasks.length > 0 ? activeReviewTasks : clientTasks;
+
+  const handleCopyLink = (taskId) => {
+    const link = `${window.location.origin}/aprovar/${taskId || clientTasks[0]?.id || 'demo'}`;
     navigator.clipboard.writeText(link);
-    alert('Link de aprovação copiado! Envie para o cliente no WhatsApp.');
+    toast.success('Link mágico de aprovação copiado para o WhatsApp!');
   };
+
+  const currentTask = clientTasks.find(t => t.id === selectedTaskId) || displayTasks[0];
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between bg-cs-surface border border-cs-border rounded-2xl p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-cs-surface border border-cs-border rounded-2xl p-6 shadow-xl">
         <div>
-          <h3 className="text-white font-bold mb-1">Review Center do Cliente</h3>
-          <p className="text-cs-text-secondary text-xs">Acompanhe as aprovações pendentes deste cliente.</p>
+          <h3 className="text-white font-bold text-lg mb-1 flex items-center gap-2">
+            <CheckCircle2 size={20} className="text-cs-primary" /> Review Center do Cliente
+          </h3>
+          <p className="text-cs-text-secondary text-xs">Histórico de versões, aprovações com 1 clique e links públicos para o cliente.</p>
         </div>
-        <button onClick={handleCopyLink} className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-2">
-          COPIAR LINK MÁGICO
+        <button 
+          onClick={() => handleCopyLink(currentTask?.id)} 
+          className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-2"
+        >
+          <Copy size={14} /> COPIAR LINK MÁGICO DO CLIENTE
         </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {[1, 2, 3].map((item) => (
-        <div key={item} className="bg-cs-surface border border-cs-border rounded-2xl overflow-hidden group">
-          <div className="aspect-square bg-cs-bg relative">
-            <img 
-              src={`https://picsum.photos/seed/${client.name + item}/600/600`} 
-              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" 
-              alt="Preview"
-            />
-            <div className="absolute top-3 right-3">
-              <span className="px-2 py-1 bg-yellow-500 text-white text-[10px] font-bold rounded shadow-lg">PENDENTE</span>
-            </div>
+      {displayTasks.length === 0 ? (
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-12 text-center">
+          <CheckCircle2 size={48} className="mx-auto mb-4 text-cs-primary/30" />
+          <h4 className="text-white font-bold text-base mb-1">Nenhuma peça em revisão no momento</h4>
+          <p className="text-xs text-cs-text-secondary">Crie uma nova demanda ou envie um entregável no Kanban de Produção.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* List of reviewable tasks */}
+          <div className="lg:col-span-4 space-y-3">
+            <h4 className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest px-1">Demandas da Conta</h4>
+            {displayTasks.map(t => (
+              <div 
+                key={t.id}
+                onClick={() => setSelectedTaskId(t.id)}
+                className={cn(
+                  "p-4 rounded-2xl border transition-all cursor-pointer",
+                  (currentTask?.id === t.id)
+                    ? "bg-cs-surface border-cs-primary shadow-lg shadow-cs-primary/10"
+                    : "bg-cs-surface/40 border-cs-border hover:border-cs-primary/40 text-cs-text-secondary"
+                )}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className={cn(
+                    "text-[10px] font-bold px-2 py-0.5 rounded uppercase border",
+                    t.status === 'aguardando-cliente' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
+                    t.status === 'concluido' ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                    "bg-cs-bg text-cs-text-secondary border-cs-border"
+                  )}>
+                    {t.status}
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCopyLink(t.id); }}
+                    className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1"
+                    title="Copiar Link de Aprovação"
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                </div>
+                <h5 className="text-sm font-bold text-white mb-1 line-clamp-1">{t.title}</h5>
+                <p className="text-[10px] text-cs-text-secondary">{t.tag || 'Social Media'} • {t.deadline ? new Date(t.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</p>
+              </div>
+            ))}
           </div>
-          <div className="p-4">
-            <h4 className="text-white font-medium text-sm mb-1">Post Carrossel: {item}</h4>
-            <p className="text-[10px] text-cs-text-secondary mb-4">Campanha: Coleção Inverno</p>
-            <div className="flex gap-2">
-              <button className="flex-1 bg-green-500 hover:bg-green-600 text-white text-[10px] font-bold py-2 rounded-lg transition-colors">APROVAR</button>
-              <button className="flex-1 bg-cs-bg border border-cs-border hover:border-red-500/50 text-white text-[10px] font-bold py-2 rounded-lg transition-colors">AJUSTES</button>
-            </div>
+
+          {/* Embedded Approval Flow for selected task */}
+          <div className="lg:col-span-8 bg-cs-surface border border-cs-border rounded-3xl p-6 shadow-2xl">
+            {currentTask ? (
+              <div>
+                <div className="border-b border-cs-border pb-4 mb-6 flex justify-between items-center">
+                  <div>
+                    <h4 className="text-lg font-bold text-white">{currentTask.title}</h4>
+                    <p className="text-xs text-cs-text-secondary mt-0.5">{currentTask.description || 'Envie e valide entregáveis desta demanda.'}</p>
+                  </div>
+                  <a 
+                    href={`/aprovar/${currentTask.id}`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="text-xs font-bold text-cs-primary hover:underline flex items-center gap-1"
+                  >
+                    Visualização do Cliente <ExternalLink size={12} />
+                  </a>
+                </div>
+                <ApprovalFlow 
+                  taskId={currentTask.id}
+                  userRole="agency"
+                  userId="demo-admin"
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-cs-text-secondary text-center py-12">Selecione uma tarefa ao lado para visualizar os entregáveis.</p>
+            )}
           </div>
         </div>
-      ))}
-      </div>
+      )}
     </div>
   );
 }
 
 function AssetsTab({ client }) {
+  const safeHandle = client?.handle || ('@' + (client?.name || 'cliente').toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const safeWeb = client?.website || 'https://comunicacaosocialag.com.br';
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <section className="space-y-4">
@@ -628,7 +745,7 @@ function AssetsTab({ client }) {
               </div>
               <div>
                 <p className="text-sm text-white font-medium">Instagram</p>
-                <p className="text-xs text-cs-text-secondary">@pontocor_oficial</p>
+                <p className="text-xs text-cs-text-secondary">{safeHandle}</p>
               </div>
             </div>
             <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
@@ -639,8 +756,8 @@ function AssetsTab({ client }) {
                 <Users size={20} className="text-blue-500" />
               </div>
               <div>
-                <p className="text-sm text-white font-medium">LinkedIn</p>
-                <p className="text-xs text-cs-text-secondary">Ponto Cor Fotografia</p>
+                <p className="text-sm text-white font-medium">Canais Oficiais</p>
+                <p className="text-xs text-cs-text-secondary">{client?.name || 'Marca'}</p>
               </div>
             </div>
             <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
@@ -652,7 +769,7 @@ function AssetsTab({ client }) {
               </div>
               <div>
                 <p className="text-sm text-white font-medium">Website Principal</p>
-                <p className="text-xs text-cs-text-secondary">pontocor.com.br</p>
+                <p className="text-xs text-cs-text-secondary">{safeWeb}</p>
               </div>
             </div>
             <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
@@ -672,9 +789,15 @@ function AssetsTab({ client }) {
               <p className="text-[10px] text-cs-text-secondary">Acesso compartilhado com a equipe</p>
             </div>
           </div>
-          <button className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
-            ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
-          </button>
+          {client?.drive_url ? (
+            <a href={client.drive_url} target="_blank" rel="noopener noreferrer" className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
+              ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
+            </a>
+          ) : (
+            <button className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
+              ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
+            </button>
+          )}
         </div>
       </section>
     </div>
@@ -689,17 +812,17 @@ function DocsTab({ client }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-[10px] text-cs-text-secondary uppercase">CNPJ</label>
-              <p className="text-sm text-white font-mono">12.345.678/0001-90</p>
+              <label className="text-[10px] text-cs-text-secondary uppercase">Documento / Registro</label>
+              <p className="text-sm text-white font-mono">{client?.document_id || '12.345.678/0001-90'}</p>
             </div>
             <div>
-              <label className="text-[10px] text-cs-text-secondary uppercase">Razão Social</label>
-              <p className="text-sm text-white">Ponto Cor ME</p>
+              <label className="text-[10px] text-cs-text-secondary uppercase">Razão Social / Nome</label>
+              <p className="text-sm text-white">{client?.name || 'Cliente'}</p>
             </div>
           </div>
           <div>
-            <label className="text-[10px] text-cs-text-secondary uppercase">Endereço</label>
-            <p className="text-sm text-white">Av. Paulista, 1000 - São Paulo, SP</p>
+            <label className="text-[10px] text-cs-text-secondary uppercase">Localização</label>
+            <p className="text-sm text-white">Poços de Caldas - MG</p>
           </div>
         </div>
       </div>
@@ -708,9 +831,8 @@ function DocsTab({ client }) {
         <h3 className="text-white font-bold mb-4">Contratos e Anexos</h3>
         <div className="space-y-3">
           {[
-            { n: 'Contrato de Prestação de Serviços - 2026', s: '2.4 MB' },
-            { n: 'Aditivo 01 - Campanha Extra', s: '1.1 MB' },
-            { n: 'Proposta Comercial Aprovada', s: '4.5 MB' },
+            { n: `Contrato de Prestação de Serviços 2026 - ${client?.name || 'Cliente'}`, s: '2.4 MB' },
+            { n: 'Manual de Identidade Visual e Compliance', s: '4.5 MB' },
           ].map((doc, i) => (
             <div key={i} className="flex items-center justify-between p-3 bg-cs-bg border border-cs-border rounded-lg group hover:border-cs-primary transition-colors">
               <div className="flex items-center gap-3">

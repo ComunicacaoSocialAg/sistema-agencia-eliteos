@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, DollarSign, BarChart, Settings, Bot, LogOut, Search, Bell, Sparkles, Shield, Beaker, Menu, X, ClipboardList, Palette, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, DollarSign, BarChart, Settings, Bot, LogOut, Search, Bell, Sparkles, Shield, Beaker, Menu, X, ClipboardList, Palette, BarChart3, Radio } from 'lucide-react';
 import SandboxView from './views/SandboxView';
 import { Toaster } from 'react-hot-toast';
 import { cn } from './utils/cn';
@@ -20,19 +20,22 @@ import DashboardView from './views/DashboardView';
 import BrandCenterView from './views/BrandCenterView';
 import PaidMediaView from './views/PaidMediaView';
 import PublicApprovalView from './views/PublicApprovalView';
+import BuzzMonitorView from './views/BuzzMonitorView';
+import { ActiveClientProvider, useActiveClient } from './contexts/ActiveClientContext';
 import { useRecurring } from './hooks/useRecurring';
 import { useNotifications } from './hooks/useNotifications';
 
 // Role-based nav items
 const ALL_NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, desc: 'Resumo pessoal do dia', roles: ['admin', 'commercial', 'production'] },
+  { id: 'buzzmonitor', label: 'Social & Conteúdo', icon: Radio, desc: 'Grade editorial e pautas', roles: ['admin', 'commercial', 'production'] },
   { id: 'clientes', label: 'Clientes & Projetos', icon: Users, desc: 'Hub completo do cliente', roles: ['admin', 'commercial', 'production'] },
   { id: 'brandcenter', label: 'Brand Center & Drive', icon: Palette, desc: 'Identidade e arquivos', roles: ['admin', 'commercial', 'production'] },
   { id: 'producao', label: 'Atendimento & Produção', icon: ClipboardList, desc: 'Fluxo de trabalho', roles: ['admin', 'commercial', 'production'] },
   { id: 'crm', label: 'CRM & Vendas', icon: Briefcase, desc: 'Prospecção e conversão', roles: ['admin', 'commercial'] },
-  { id: 'midia', label: 'Mídia Paga & Performance', icon: BarChart3, desc: 'Meta & Google Ads', roles: ['admin', 'commercial', 'production'] },
+  { id: 'midia', label: 'Mídia Paga & Tráfego', icon: BarChart3, desc: 'Controle de verba e campanhas', roles: ['admin', 'commercial', 'production'] },
   { id: 'financeiro', label: 'Financeiro', icon: DollarSign, desc: 'Gestão e cobrança', roles: ['admin'] },
-  { id: 'relatorios', label: 'Relatórios & BI', icon: BarChart, desc: 'Inteligência de resultados', roles: ['admin', 'commercial', 'production'] },
+  { id: 'relatorios', label: 'Relatórios & BI', icon: BarChart, desc: 'Inteligência e prestação de contas', roles: ['admin', 'commercial', 'production'] },
   { id: 'gestao', label: 'Gestão da Agência', icon: Settings, desc: 'Operação interna', roles: ['admin'] },
   { id: 'ia', label: 'Camada de IA', icon: Bot, desc: 'Gemini API (Gratuita)', roles: ['admin', 'commercial', 'production'] },
 ];
@@ -43,7 +46,8 @@ const CLIENT_NAV_ITEMS = [
 ];
 
 function AppShell() {
-  const { profile, role, signOut, isDemoMode } = useAuth();
+  const { profile, role, signOut, isDemoMode, switchDemoUser } = useAuth();
+  const { selectedClientId, setSelectedClientId, clients } = useActiveClient();
   const [searchValue, setSearchValue] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -118,42 +122,39 @@ function AppShell() {
                   isActive
                     ? isIA
                       ? "bg-cs-accent/10 text-cs-accent"
-                      : "bg-cs-primary/10 text-white"
-                    : "text-cs-text-secondary hover:bg-white/5 hover:text-white"
+                      : "bg-cs-primary text-black font-bold shadow-lg shadow-cs-primary/10"
+                    : "text-cs-text-secondary hover:text-white hover:bg-white/5"
                 )}
               >
-                {isActive && (
-                  <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full", isIA ? "bg-cs-accent" : "bg-cs-primary")} />
-                )}
-                <div className={cn(
-                  "p-1.5 rounded-lg shrink-0",
-                  isActive
-                    ? isIA ? "bg-cs-accent/20" : "bg-cs-primary/20"
-                    : "bg-white/5 group-hover:bg-white/10"
-                )}>
-                  <Icon size={15} className={isActive ? (isIA ? "text-cs-accent" : "text-cs-primary") : "text-cs-text-secondary group-hover:text-white"} />
+                <Icon size={18} className={cn("shrink-0", isActive ? (isIA ? "text-cs-accent" : "text-black") : "text-cs-text-secondary group-hover:text-white")} />
+                <div className="min-w-0 flex-1">
+                  <div className={cn("text-xs font-semibold truncate", isActive ? (isIA ? "text-cs-accent font-bold" : "text-black font-bold") : "text-cs-text-primary group-hover:text-white")}>
+                    {item.label}
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className={cn("text-sm font-medium leading-tight truncate", isActive ? "text-white" : "")}>{item.label}</div>
-                  <div className="text-[10px] text-cs-text-secondary mt-0.5 truncate">{item.desc}</div>
-                </div>
-                {isIA && <Sparkles size={11} className="text-cs-accent shrink-0 animate-pulse" />}
               </button>
             );
           })}
         </nav>
 
-        <div className="p-3 border-t border-cs-border">
-          <div className="flex items-center gap-3 p-2 bg-cs-bg rounded-xl border border-cs-border hover:border-cs-border/60 transition-colors">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cs-primary to-cs-accent flex items-center justify-center text-white font-bold text-xs shrink-0">
-              {profile?.name?.charAt(0) || 'U'}
+        {/* User Card */}
+        <div className="p-4 border-t border-cs-border bg-cs-bg/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-cs-primary/20 text-cs-primary font-bold flex items-center justify-center text-xs shrink-0 border border-cs-primary/30">
+                {profile?.name?.charAt(0) || 'U'}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white truncate">{profile?.name || 'Usuário'}</div>
+                <div className="text-[10px] text-cs-text-secondary truncate">{profile?.roleTitle || 'Colaborador'}</div>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-white truncate">{profile?.name || 'Usuário'}</div>
-              <div className="text-[10px] text-cs-text-secondary capitalize">{profile?.roleTitle || profile?.role}</div>
-            </div>
-            <button onClick={signOut} className="text-cs-text-secondary hover:text-red-400 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg" title="Sair">
-              <LogOut size={15} />
+            <button 
+              onClick={signOut}
+              className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-white/5 transition-colors"
+              title="Sair"
+            >
+              <LogOut size={16} />
             </button>
           </div>
         </div>
@@ -162,24 +163,61 @@ function AppShell() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden bg-cs-bg min-w-0 w-full relative">
         {/* Header */}
-        <header className="h-14 border-b border-cs-border bg-cs-bg/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
+        <header className="h-16 border-b border-cs-border bg-cs-bg/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
           <div className="flex items-center gap-3 overflow-hidden">
             <button className="md:hidden text-cs-text-secondary hover:text-white" onClick={() => setIsMobileMenuOpen(true)}>
               <Menu size={20} />
             </button>
-            <h1 className="text-lg font-semibold text-white truncate">
-              {navItems.find(i => i.id === validView)?.label}
+            <h1 className="text-lg font-bold text-white truncate">
+              {navItems.find(i => i.id === validView)?.label || 'Visão Geral'}
             </h1>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {/* Seletor Global de Cliente Ativo */}
+            {effectiveRole !== 'client' && (
+              <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
+                <span className="text-[10px] text-cs-primary font-bold uppercase tracking-wider hidden lg:inline">Cliente em Foco:</span>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer max-w-[210px] truncate"
+                >
+                  <option value="all" className="bg-cs-bg text-white">🏢 Todos os Clientes (Visão Geral)</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id} className="bg-cs-bg text-white">
+                      {c.name.includes('Dr.') ? '🩺 ' : '🥫 '} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Persona Switcher for effortless Multi-role testing */}
+            <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
+              <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider hidden lg:inline">Alternar Perfil:</span>
+              <select
+                value={profile?.email || 'admin@csag.com'}
+                onChange={(e) => {
+                  const u = switchDemoUser(e.target.value);
+                  if (u?.role === 'client') setActiveView('hub');
+                  else if (activeView === 'hub') setActiveView('dashboard');
+                }}
+                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+              >
+                <option value="admin@csag.com" className="bg-cs-bg text-white">👑 Bruno (Agência : Operador Geral)</option>
+                <option value="cliente@dubola.com.br" className="bg-cs-bg text-white">🥫 Roberto (Cliente : Dubola Molhos)</option>
+                <option value="cliente@dralberto.com.br" className="bg-cs-bg text-white">🩺 Dr. Alberto Brasil (Cliente : Cirurgião Vascular)</option>
+              </select>
+            </div>
+
             <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-cs-text-secondary" size={14} />
               <input
                 type="text"
                 value={searchValue}
                 onChange={e => setSearchValue(e.target.value)}
-                placeholder="Buscar em todo o OS..."
-                className="bg-cs-surface border border-cs-border rounded-full pl-9 pr-4 py-1.5 text-sm focus:outline-none focus:border-cs-primary focus:ring-1 focus:ring-cs-primary transition-all w-56 text-white placeholder:text-cs-text-secondary"
+                placeholder="Buscar no sistema..."
+                className="bg-cs-surface border border-cs-border rounded-full pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-cs-primary focus:ring-1 focus:ring-cs-primary transition-all w-48 text-white placeholder:text-cs-text-secondary"
               />
             </div>
             <div className="relative">
@@ -226,6 +264,7 @@ function AppShell() {
 
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           {validView === 'dashboard' && <DashboardView />}
+          {validView === 'buzzmonitor' && <BuzzMonitorView />}
           {validView === 'clientes' && <ClientsView />}
           {validView === 'brandcenter' && <BrandCenterView />}
           {validView === 'producao' && <ProductionView />}
@@ -237,7 +276,6 @@ function AppShell() {
           {validView === 'gestao' && <ManagementView />}
           {validView === 'ia' && <AILayerView />}
           {validView === 'sandbox' && <SandboxView />}
-
         </div>
       </main>
 
@@ -346,9 +384,11 @@ export default function App() {
     <GlobalErrorBoundary>
       <BrowserRouter>
         <AuthProvider>
-          <AIAssistantProvider>
-            <AuthGate />
-          </AIAssistantProvider>
+          <ActiveClientProvider>
+            <AIAssistantProvider>
+              <AuthGate />
+            </AIAssistantProvider>
+          </ActiveClientProvider>
         </AuthProvider>
       </BrowserRouter>
     </GlobalErrorBoundary>

@@ -16,8 +16,13 @@ dist-ssr
 !.env.example
 scratch/
 backups/
+client_secret*.json
+*.pem
+*.key
 
-# Editor directories and files
+# Agent and IDE directories
+.agents/
+.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea

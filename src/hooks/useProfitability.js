@@ -7,13 +7,8 @@ export function useProfitability() {
 
   const fetchProfitability = useCallback(async () => {
     if (!isSupabaseConfigured) {
-      // Mock data for demo
-      setData([
-        { id: '1', name: 'Ponto Cor', revenue: 15000, costHours: 3200, costDirect: 0, margin: 78.6 },
-        { id: '2', name: 'TechStart App', revenue: 8500, costHours: 4500, costDirect: 0, margin: 47.1 },
-        { id: '3', name: 'Café Blend', revenue: 2000, costHours: 1800, costDirect: 0, margin: 10.0 },
-        { id: '4', name: 'Clínica Sorriso', revenue: 3500, costHours: 1200, costDirect: 0, margin: 65.7 },
-      ]);
+      // Sem banco não há horas cronometradas nem fees confiáveis: não exibimos margem estimada.
+      setData([]);
       setLoading(false);
       return;
     }

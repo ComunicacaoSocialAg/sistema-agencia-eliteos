@@ -154,7 +154,7 @@ export default function NewTaskModal({ onClose, onSave, initialClient }) {
               <textarea
                 value={rawText}
                 onChange={e => setRawText(e.target.value)}
-                placeholder="Ex: Bruno, preciso de 3 posts para o Ponto Cor sobre a promoção de Dia das Mães até sexta..."
+                placeholder="Ex: Bruno, preciso de 1 carrossel educativo sobre varizes e dor nas pernas para o Dr. Alberto até sexta..."
                 className="w-full bg-cs-bg/50 border border-cs-border rounded-xl p-4 text-sm text-white focus:outline-none focus:border-cs-primary h-32 resize-none"
               />
               <button 

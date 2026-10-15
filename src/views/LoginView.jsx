@@ -213,18 +213,63 @@ export default function LoginView() {
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
+          {/* Acesso Rápido */}
+          <div className="pt-2 border-t border-cs-border/60">
+            <p className="text-[11px] font-medium text-cs-text-secondary mb-2.5 text-center">Acesso rápido para testes:</p>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@csag.com');
+                  setPassword('demo123');
+                  signIn('admin@csag.com', 'demo123');
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl bg-cs-bg hover:bg-yellow-500/10 border border-cs-border hover:border-yellow-500/40 transition-all flex items-center justify-between group"
+              >
+                <div>
+                  <span className="text-xs font-semibold text-white group-hover:text-yellow-400 block">Bruno (Agência)</span>
+                  <span className="text-[10px] text-cs-text-secondary">Sócio-Diretor e Operador Único</span>
+                </div>
+                <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-bold">Admin</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('cliente@dralberto.com.br');
+                  setPassword('demo123');
+                  signIn('cliente@dralberto.com.br', 'demo123');
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl bg-cs-bg hover:bg-blue-500/10 border border-cs-border hover:border-blue-500/40 transition-all flex items-center justify-between group"
+              >
+                <div>
+                  <span className="text-xs font-semibold text-white group-hover:text-blue-400 block">Dr. Alberto Brasil</span>
+                  <span className="text-[10px] text-cs-text-secondary">Cirurgião Vascular (CFM 2.336/2023)</span>
+                </div>
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-bold">Portal Cliente</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('cliente@dubola.com.br');
+                  setPassword('demo123');
+                  signIn('cliente@dubola.com.br', 'demo123');
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl bg-cs-bg hover:bg-orange-500/10 border border-cs-border hover:border-orange-500/40 transition-all flex items-center justify-between group"
+              >
+                <div>
+                  <span className="text-xs font-semibold text-white group-hover:text-orange-400 block">Roberto (Dubola)</span>
+                  <span className="text-[10px] text-cs-text-secondary">Dubola Molhos Especiais</span>
+                </div>
+                <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded font-bold">Portal Cliente</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Ações Auxiliares */}
-        <div className="mt-6">
-          <div className="relative flex items-center gap-3 mb-5">
-            <div className="flex-1 h-px bg-cs-border"></div>
-            <span className="text-[10px] text-cs-text-secondary uppercase tracking-wider font-semibold">
-              Ou
-            </span>
-            <div className="flex-1 h-px bg-cs-border"></div>
-          </div>
-          
+        <div className="mt-4">
           <div className="flex items-center justify-between px-2">
             <button 
               type="button" 

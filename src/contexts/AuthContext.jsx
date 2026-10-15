@@ -3,12 +3,11 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const AuthContext = createContext(null);
 
-// Usuários mock para modo demonstração (sem Supabase ou quando Supabase não responde)
-const DEMO_USERS = {
-  'admin@csag.com': { id: 'demo-admin', name: 'Bruno', role: 'admin', roleTitle: 'Sócio-Diretor', email: 'admin@csag.com' },
-  'producao@csag.com': { id: 'demo-prod', name: 'Carlos', role: 'production', roleTitle: 'Diretor de Arte', email: 'producao@csag.com' },
-  'ana@csag.com': { id: 'demo-ana', name: 'Ana', role: 'production', roleTitle: 'Designer', email: 'ana@csag.com' },
-  'cliente@pontocor.com': { id: 'demo-client', name: 'Fernando (Ponto Cor)', role: 'client', roleTitle: 'Cliente', email: 'cliente@pontocor.com', client_id: '11111111-0000-0000-0000-000000000001' },
+// Usuários para operação da agência e acesso dos clientes
+export const DEMO_USERS = {
+  'admin@csag.com': { id: 'demo-admin', name: 'Bruno', role: 'admin', roleTitle: 'Sócio-Diretor & Operador Geral', email: 'admin@csag.com' },
+  'cliente@dubola.com.br': { id: 'demo-client-dubola', name: 'Roberto (Dubola Molhos)', role: 'client', roleTitle: 'Cliente', email: 'cliente@dubola.com.br', client_id: 'client-dubola' },
+  'cliente@dralberto.com.br': { id: 'demo-client-alberto', name: 'Dr. Alberto Brasil', role: 'client', roleTitle: 'Cliente (Cirurgião Vascular)', email: 'cliente@dralberto.com.br', client_id: 'client-alberto-brasil' },
 };
 
 export function AuthProvider({ children }) {
@@ -36,13 +35,53 @@ export function AuthProvider({ children }) {
       clearTimeout(timeoutId);
       if (session?.user) {
         setUser(session.user);
-        // Não usar await aqui para não bloquear a UI ("lento pra carregar")
         loadProfile(session.user.id, session.user.email);
+      } else {
+        const stored = localStorage.getItem('csag_demo_user');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed) {
+              setUser(parsed);
+              setProfile(parsed);
+            } else {
+              setUser(DEMO_USERS['admin@csag.com']);
+              setProfile(DEMO_USERS['admin@csag.com']);
+            }
+          } catch (e) {
+            console.warn(e);
+            setUser(DEMO_USERS['admin@csag.com']);
+            setProfile(DEMO_USERS['admin@csag.com']);
+          }
+        } else {
+          setUser(DEMO_USERS['admin@csag.com']);
+          setProfile(DEMO_USERS['admin@csag.com']);
+        }
       }
       setLoading(false);
-    }).catch(() => {
+    }).catch((e) => {
       clearTimeout(timeoutId);
-      console.warn('[Auth] Erro ao conectar com Supabase. Ativando modo demo.');
+      console.warn('[Auth] Erro ao conectar com Supabase. Ativando modo demo:', e);
+      const stored = localStorage.getItem('csag_demo_user');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed) {
+            setUser(parsed);
+            setProfile(parsed);
+          } else {
+            setUser(DEMO_USERS['admin@csag.com']);
+            setProfile(DEMO_USERS['admin@csag.com']);
+          }
+        } catch (err) {
+          console.warn(err);
+          setUser(DEMO_USERS['admin@csag.com']);
+          setProfile(DEMO_USERS['admin@csag.com']);
+        }
+      } else {
+        setUser(DEMO_USERS['admin@csag.com']);
+        setProfile(DEMO_USERS['admin@csag.com']);
+      }
       setFallbackToDemo(true);
       setLoading(false);
     });
@@ -106,6 +145,11 @@ export function AuthProvider({ children }) {
       if (demoUser && isDemoPassword) {
         setUser(demoUser);
         setProfile(demoUser);
+        try {
+          localStorage.setItem('csag_demo_user', JSON.stringify(demoUser));
+        } catch (e) {
+          console.warn(e);
+        }
         console.log('[Auth] Login Demo bem-sucedido (Supabase indisponível):', email);
         return { error: null };
       }
@@ -147,6 +191,11 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    try {
+      localStorage.removeItem('csag_demo_user');
+    } catch (e) {
+      console.warn(e);
+    }
     if (fallbackToDemo || !isSupabaseConfigured) {
       setUser(null);
       setProfile(null);
@@ -244,6 +293,21 @@ export function AuthProvider({ children }) {
     setAllUsers(prev => prev.filter(u => u.id !== userId));
   };
 
+  const switchDemoUser = (emailOrKey) => {
+    const target = DEMO_USERS[emailOrKey.toLowerCase()] || allUsers.find(u => u.email.toLowerCase() === emailOrKey.toLowerCase());
+    if (target) {
+      setUser(target);
+      setProfile(target);
+      try {
+        localStorage.setItem('csag_demo_user', JSON.stringify(target));
+      } catch (e) {
+        console.warn(e);
+      }
+      return target;
+    }
+    return null;
+  };
+
   const role = profile?.role || null;
   const isAdmin = role === 'admin';
   const isCommercial = role === 'commercial';
@@ -254,7 +318,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user, profile, loading, role,
       isAdmin, isCommercial, isProduction, isClient,
-      signIn, signOut,
+      signIn, signOut, switchDemoUser,
       allUsers, createUser, deleteUser,
       isDemoMode: fallbackToDemo || !isSupabaseConfigured,
       isRecoveringPassword, sendPasswordResetEmail, updateUserPassword
@@ -278,6 +342,7 @@ export function useAuth() {
       isDemoMode: true,
       signIn: async () => ({ error: { message: 'AuthProvider não encontrado.' } }),
       signOut: () => {},
+      switchDemoUser: () => {},
       isRecoveringPassword: false,
     };
   }

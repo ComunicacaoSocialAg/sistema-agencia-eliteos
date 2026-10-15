@@ -17,6 +17,7 @@ import { useDeliverables } from '../hooks/useDeliverables';
 import { cn } from '../utils/cn';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import toast from 'react-hot-toast';
 
 export default function ApprovalFlow({ taskId, userRole, userId }) {
   const { versions, loading, fetchVersions, uploadVersion, updateStatus } = useDeliverables(taskId);
@@ -152,7 +153,20 @@ export default function ApprovalFlow({ taskId, userRole, userId }) {
                 <div className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <h4 className="text-white font-bold text-sm">Versão {v.version_number}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-white font-bold text-sm">Versão {v.version_number}</h4>
+                        <span className={cn(
+                          "text-[9px] px-2 py-0.5 rounded-md font-bold uppercase border",
+                          v.version_number === 1 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                          v.version_number <= 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                          "bg-red-500/10 text-red-400 border-red-500/20"
+                        )}>
+                          {v.version_number === 1 ? 'Entrega Original' :
+                           v.version_number === 2 ? '1ª Rodada de Ajustes' :
+                           v.version_number === 3 ? '2ª Rodada de Ajustes' :
+                           `Ajuste Excedente (${v.version_number}ª rodada)`}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-cs-text-secondary">
                         {format(new Date(v.created_at), "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                       </p>
