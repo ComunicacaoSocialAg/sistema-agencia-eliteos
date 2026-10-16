@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
+import { areIdsMatching } from './useClients';
 
 const INITIAL_DEMO_TASKS = [
   {
@@ -60,15 +61,15 @@ const INITIAL_DEMO_TASKS = [
   },
   {
     id: 'task-dubola-2',
-    title: 'Setup de Tráfego Pago Meta Ads (Campanha Gourmet Churrasco)',
-    description: 'Estruturação de público Lookalike e criativos em vídeo para conversão no e-commerce.',
+    title: 'Roteiro e Edição de Reels: Harmonização com Carnes Defumadas',
+    description: 'Produção de vídeo orgânico para Instagram e TikTok demonstrando o uso prático dos molhos artesanais em cortes de carne nobres.',
     client_id: 'client-dubola',
     client_name: 'Dubola Molhos Especiais',
     client: { name: 'Dubola Molhos Especiais' },
     status: 'em-producao',
     demand_status: 'em_producao',
     priority: 'high',
-    tag: 'Campanha',
+    tag: 'Social Media',
     assigned_to: 'Bruno',
     deadline: '2026-10-20',
     estimated_hours: 4.0,
@@ -164,14 +165,35 @@ export function useTasks(clientId, options = {}) {
     return () => unsubscribe();
   }, [clientId, showArchived]);
 
-  // Persistência local em modo demo
+  // Persistência local em modo demo e sincronização reativa
   useEffect(() => {
     try {
       localStorage.setItem('csag_custom_tasks', JSON.stringify(tasks));
+      window.dispatchEvent(new CustomEvent('csag_tasks_updated', { detail: tasks }));
     } catch (e) {
       console.warn(e);
     }
   }, [tasks]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      try {
+        const saved = localStorage.getItem('csag_custom_tasks');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) setTasks(parsed);
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    };
+    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('csag_tasks_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('csag_tasks_updated', handleUpdate);
+    };
+  }, []);
 
   const updateTask = async (updatedTask) => {
     setTasks(prev => prev.map(t => t.id === updatedTask.id ? { ...t, ...updatedTask } : t));
@@ -313,9 +335,9 @@ export function useTasks(clientId, options = {}) {
     }
   };
 
-  // Filtrar tarefas se clientId for fornecido
+  // Filtrar tarefas se clientId for fornecido (com reconciliação de UUID e slug)
   const filteredTasks = clientId 
-    ? tasks.filter(t => t.client_id === clientId || (t.client && t.client.name === clientId))
+    ? tasks.filter(t => areIdsMatching(t.client_id, clientId, t.client_name || t.client?.name, ''))
     : tasks;
 
   return { 

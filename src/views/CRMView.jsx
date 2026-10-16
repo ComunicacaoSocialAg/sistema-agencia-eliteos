@@ -9,6 +9,7 @@ import { useDeals } from '../hooks/useDeals';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useClients } from '../hooks/useClients';
 import { useTasks } from '../hooks/useTasks';
+import { useInvoices } from '../hooks/useInvoices';
 import { generateOnboardingWorkflow } from '../components/OnboardingModule';
 import { generateContent } from '../lib/gemini';
 
@@ -607,6 +608,7 @@ export default function CRMView() {
   const { deals, moveDeal, createDeal, updateDeal, deleteDeal, restoreDeal, restoreMissingDefaults } = useDeals();
   const { clients, createClient } = useClients();
   const { createTask } = useTasks();
+  const { createInvoice } = useInvoices();
   const { setContext } = useAIAssistant();
   
   const [showNewDealModal, setShowNewDealModal] = useState(false);
@@ -653,10 +655,27 @@ export default function CRMView() {
           monthly_fee: deal.value || 5000,
           brand_color: '#eab308',
           status: 'active',
+          notes: deal.notes || '',
           tone_of_voice: 'Profissional e Estratégico',
           target_audience: 'Público Qualificado',
-          strategic_goals: 'Geração de Demanda e Fortalecimento de Marca'
+          strategic_goals: deal.notes || 'Geração de Demanda e Fortalecimento de Marca'
         });
+
+        // 1ª Mensalidade (Fee) gerada automaticamente no Financeiro
+        if (createInvoice) {
+          try {
+            await createInvoice({
+              client_id: newClient.id,
+              client_name: newClient.name,
+              amount: deal.value || 5000,
+              due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              status: 'pendente',
+              description: `1ª Mensalidade - Contrato fechado via CRM (${deal.company})`
+            });
+          } catch (invErr) {
+            console.warn('Erro ao gerar primeira fatura:', invErr);
+          }
+        }
 
         const onboardingTasks = generateOnboardingWorkflow(newClient.id, new Date().toISOString());
         for (const t of onboardingTasks) {
@@ -673,7 +692,7 @@ export default function CRMView() {
             description: t.description,
           });
         }
-        toast.success(`🎉 Negócio Ganho! Cliente "${deal.company}" cadastrado e onboarding criado.`);
+        toast.success(`🎉 Negócio Ganho! Cliente "${deal.company}" cadastrado, 1ª fatura emitida e onboarding criado.`);
       } catch (error) {
         console.error("Erro no handoff:", error);
       }
@@ -1038,120 +1057,307 @@ export default function CRMView() {
 }
 
 function AIProspectingModal({ deal, onClose }) {
-  const [copyType, setCopyType] = useState('email');
-  const [generatedText, setGeneratedText] = useState('');
+  const [activeTab, setActiveTab] = useState('prospeccao'); // 'prospeccao' | 'respostas'
+  const [copyType, setCopyType] = useState('whatsapp'); // 'whatsapp' | 'email' | 'pitch'
+  const [selectedObjection, setSelectedObjection] = useState('');
+  const [customReplyPrompt, setCustomReplyPrompt] = useState('');
+  const [versionA, setVersionA] = useState('');
+  const [versionB, setVersionB] = useState('');
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedA, setCopiedA] = useState(false);
+  const [copiedB, setCopiedB] = useState(false);
 
-  const generatePitch = async () => {
+  const cleanPhone = (deal.contact_phone || '').replace(/\D/g, '');
+  const waNumber = cleanPhone.length === 10 || cleanPhone.length === 11 ? `55${cleanPhone}` : cleanPhone;
+
+  const COMMON_OBJECTIONS = [
+    { id: 'preco', label: 'Preço alto / fora do orçamento', text: 'Achei o valor de R$ 1.800/mês um pouco puxado para o momento.' },
+    { id: 'pdf', label: 'Mandar proposta por PDF', text: 'Me manda a proposta completa em PDF por aqui que eu dou uma olhada com calma.' },
+    { id: 'agencia', label: 'Já tenho quem faça', text: 'Já tenho uma agência/sobrinho que cuida dos meus posts e tráfego.' },
+    { id: 'trafego', label: 'Apenas tráfego sem redes', text: 'Não quero fazer conteúdo nem gravar vídeos, só quero anúncios rodando.' },
+    { id: 'retorno', label: 'Prazo e garantia de retorno', text: 'Em quanto tempo começo a ter novos clientes na clínica?' }
+  ];
+
+  const generateAIPitches = async () => {
     setLoading(true);
+    setVersionA('');
+    setVersionB('');
+
     try {
-      const prompt = `Você é o Diretor Comercial da agência Comunicação Social Ag (CS Ag), Poços de Caldas - MG.
-Crie um material de prospecção ${copyType === 'email' ? 'E-mail de Cold Outreach' : copyType === 'whatsapp' ? 'Mensagem curta e humana de WhatsApp' : 'Pitch Comercial de 1 minuto para ligação'} para o cliente:
+      let prompt = '';
+      if (activeTab === 'prospeccao') {
+        prompt = `Você é o Diretor Comercial da agência Comunicação Social Ag (CS Ag), Poços de Caldas, MG.
+Gere 2 versões de abordagem de prospecção para o canal "${copyType.toUpperCase()}" para o prospect:
 - Empresa: ${deal.company}
 - Contato: ${deal.contact || 'Prezado(a)'}
-- Telefone: ${deal.contact_phone || 'Não informado'}
-- Diagnóstico identificado: ${deal.notes || 'Sem observações prévias'}
+- Diagnóstico: ${deal.notes || 'Sem observações prévias'}
 - Ticket Estimado: R$ ${deal.value || 1800}/mês
 
-Diretrizes obrigatórias:
-1. Tom consultivo, direto e sem clichês de agência tradicional.
-2. Gancho baseado no diagnóstico real (ex: falta de site próprio, dependência de linktree ou canva, potencial de implantes ou odontologia especializada em Poços de Caldas).
-3. Convidar para uma conversa rápida de 15 minutos sem compromisso.`;
+Regras CS Ag: nunca use travessão longo. Seja pragmático, sem clichês de agência. Gancho baseado no diagnóstico real. Convite para conversa de 15 minutos.
+Formate estritamente assim:
+[VERSAO_1]
+(texto da versão 1: mais direta, enérgica e orientada ao problema)
+[VERSAO_2]
+(texto da versão 2: mais consultiva, elegante e orientada a relacionamento)`;
+      } else {
+        const leadText = customReplyPrompt || selectedObjection || 'Achei o valor acima do esperado.';
+        prompt = `Você é o Diretor Comercial da agência Comunicação Social Ag (CS Ag), Poços de Caldas, MG.
+O lead da empresa "${deal.company}" (${deal.contact || 'Doutor(a)'}) enviou a seguinte mensagem/objeção no WhatsApp:
+"${leadText}"
 
-      const text = await generateContent(prompt);
-      setGeneratedText(text);
+Gere 2 opções de resposta curta e humana para WhatsApp:
+[VERSAO_1]
+(Opção 1: Resposta rápida, segura e assertiva para quebrar a objeção e propor ligação de 10 min)
+[VERSAO_2]
+(Opção 2: Resposta consultiva, explicando o modelo estratégico da CS Ag e convidando para demonstrar na prática)
+
+Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
+      }
+
+      const raw = await generateContent(prompt);
+      let textA = '';
+      let textB = '';
+
+      if (raw.includes('[VERSAO_1]') && raw.includes('[VERSAO_2]')) {
+        const parts = raw.split('[VERSAO_2]');
+        textA = parts[0].replace('[VERSAO_1]', '').trim();
+        textB = (parts[1] || '').trim();
+      } else if (raw.includes('Opção 1') && raw.includes('Opção 2')) {
+        const parts = raw.split(/Opção 2:?/i);
+        textA = parts[0].replace(/Opção 1:?/i, '').trim();
+        textB = (parts[1] || '').trim();
+      } else {
+        textA = raw;
+        textB = `Olá ${deal.contact || 'Doutor(a)'}! Tudo bem?\n\nEntendo perfeitamente o seu ponto sobre ${deal.company}. Justamente por isso nosso trabalho é focado em retorno prático e processos enxutos.\n\nPodemos fazer um alinhamento rápido de 10 minutos nesta semana?\n\nAbraço,\nBruno | CS Ag`;
+      }
+
+      setVersionA(textA);
+      setVersionB(textB);
     } catch {
-      setGeneratedText(`Olá ${deal.contact || 'Doutor(a)'}! Tudo bem?\n\nAcompanho a presença da ${deal.company} aqui em Poços de Caldas e notei que podemos fortalecer o posicionamento digital de vocês para captação de pacientes qualificados.\n\nPodemos marcar um café ou conversa de 15 minutos nesta semana?\n\nUm abraço,\nBruno | CS Ag`);
+      setVersionA(`Olá ${deal.contact || 'Doutor(a)'}! Tudo bem?\n\nAcompanho a presença da ${deal.company} aqui em Poços de Caldas e notei pontos cruciais que podemos destravar para acelerar sua captação de clientes.\n\nPodemos marcar um café de 15 minutos nesta semana?\n\nUm abraço,\nBruno | CS Ag`);
+      setVersionB(`Prezado(a) ${deal.contact || 'Doutor(a)'}, como vai?\n\nAvaliando o posicionamento digital da ${deal.company}, estruturamos uma estratégia personalizada focada em autoridade e captação qualificada.\n\nVocê teria disponibilidade para uma breve ligação de 10 minutos amanhã?\n\nAtenciosamente,\nBruno | CS Ag`);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    generatePitch();
-  }, [copyType, deal]);
+    generateAIPitches();
+  }, [activeTab, copyType, selectedObjection]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(generatedText);
-    setCopied(true);
-    toast.success('Abordagem copiada para a área de transferência!');
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = (text, isA) => {
+    navigator.clipboard.writeText(text);
+    if (isA) {
+      setCopiedA(true);
+      setTimeout(() => setCopiedA(false), 2000);
+    } else {
+      setCopiedB(true);
+      setTimeout(() => setCopiedB(false), 2000);
+    }
+    toast.success('Versão copiada para a área de transferência!');
+  };
+
+  const handleOpenWhatsApp = (text) => {
+    if (!waNumber) {
+      toast.error('Telefone não informado para este contato.');
+      return;
+    }
+    window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={onClose}>
-      <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+      <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div className="p-6 border-b border-cs-border flex items-center justify-between bg-cs-bg/50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-cs-accent/20 text-cs-accent border border-cs-accent/30">
+            <div className="p-2.5 rounded-xl bg-cs-primary/20 text-cs-primary border border-cs-primary/30">
               <Sparkles size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">IA Outbound Copilot: Prospecção</h3>
-              <p className="text-xs text-cs-text-secondary">{deal.company} ({deal.contact || 'Contato'})</p>
+              <h3 className="text-lg font-bold text-white">Copiloto Comercial de IA: Prospecção & Respostas</h3>
+              <p className="text-xs text-cs-text-secondary">{deal.company} ({deal.contact || 'Contato'}) {deal.contact_phone ? `• ${deal.contact_phone}` : ''}</p>
             </div>
           </div>
           <button onClick={onClose} className="text-cs-text-secondary hover:text-white transition-colors cursor-pointer"><X size={20} /></button>
         </div>
 
-        <div className="p-4 border-b border-cs-border bg-cs-bg/30 flex gap-2 shrink-0">
-          {[
-            { id: 'email', label: '📧 Cold E-mail' },
-            { id: 'whatsapp', label: '💬 WhatsApp' },
-            { id: 'pitch', label: '🎙️ Pitch Cold Call' },
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => setCopyType(t.id)}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                copyType === t.id
-                  ? 'bg-cs-primary text-white border-cs-primary shadow-lg shadow-cs-primary/20'
-                  : 'bg-cs-bg text-cs-text-secondary border-cs-border hover:text-white'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* Modal Main Tabs */}
+        <div className="flex border-b border-cs-border bg-cs-bg/40 px-6 shrink-0">
+          <button
+            onClick={() => { setActiveTab('prospeccao'); setSelectedObjection(''); }}
+            className={`py-3.5 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+              activeTab === 'prospeccao'
+                ? 'border-cs-primary text-white bg-cs-primary/10'
+                : 'border-transparent text-cs-text-secondary hover:text-white'
+            }`}
+          >
+            <Sparkles size={14} /> 1. Abordagem Inicial (Outbound)
+          </button>
+          <button
+            onClick={() => { setActiveTab('respostas'); }}
+            className={`py-3.5 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+              activeTab === 'respostas'
+                ? 'border-cs-primary text-white bg-cs-primary/10'
+                : 'border-transparent text-cs-text-secondary hover:text-white'
+            }`}
+          >
+            <MessageCircle size={14} /> 2. Responder Lead / Quebrar Objeções
+          </button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 space-y-4">
-              <Sparkles size={32} className="text-cs-accent animate-spin" />
-              <p className="text-xs text-cs-text-secondary font-bold uppercase tracking-widest">Criando abordagem de alta conversão...</p>
+        {/* Controls Bar */}
+        <div className="p-4 border-b border-cs-border bg-cs-bg/20 shrink-0 space-y-3">
+          {activeTab === 'prospeccao' ? (
+            <div className="flex gap-2">
+              {[
+                { id: 'whatsapp', label: '💬 WhatsApp' },
+                { id: 'email', label: '📧 Cold E-mail' },
+                { id: 'pitch', label: '🎙️ Pitch de Ligação' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setCopyType(t.id)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                    copyType === t.id
+                      ? 'bg-cs-primary text-white border-cs-primary shadow-lg shadow-cs-primary/20'
+                      : 'bg-cs-surface text-cs-text-secondary border-cs-border hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           ) : (
-            <textarea
-              readOnly
-              value={generatedText}
-              className="w-full h-64 bg-cs-bg border border-cs-border rounded-2xl p-4 text-sm text-white focus:outline-none custom-scrollbar font-sans leading-relaxed"
-            />
+            <div className="space-y-2.5">
+              <span className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-wider block">
+                Objeções Comuns do Lead (Selecione ou digite abaixo):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {COMMON_OBJECTIONS.map(obj => (
+                  <button
+                    key={obj.id}
+                    onClick={() => {
+                      setSelectedObjection(obj.text);
+                      setCustomReplyPrompt('');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border cursor-pointer ${
+                      selectedObjection === obj.text
+                        ? 'bg-cs-primary text-white border-cs-primary'
+                        : 'bg-cs-surface text-cs-text-secondary border-cs-border hover:text-white'
+                    }`}
+                  >
+                    {obj.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  value={customReplyPrompt}
+                  onChange={e => {
+                    setCustomReplyPrompt(e.target.value);
+                    setSelectedObjection('');
+                  }}
+                  placeholder="Ou cole aqui exatamente o que o lead escreveu..."
+                  className="flex-1 bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
+                />
+                <button
+                  onClick={generateAIPitches}
+                  className="px-4 py-2 bg-cs-primary hover:bg-cs-primary-hover text-white rounded-xl text-xs font-bold transition-all"
+                >
+                  Regerar
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="p-6 border-t border-cs-border bg-cs-bg/50 flex items-center justify-between shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-cs-text-secondary hover:text-white uppercase tracking-wider cursor-pointer">Fechar</button>
-          <div className="flex gap-2">
-            {deal.contact_phone && copyType === 'whatsapp' && (
-              <button
-                onClick={() => {
-                  const clean = deal.contact_phone.replace(/\D/g, '');
-                  const number = clean.length === 10 || clean.length === 11 ? `55${clean}` : clean;
-                  window.open(`https://wa.me/${number}?text=${encodeURIComponent(generatedText)}`, '_blank');
-                }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20"
-              >
-                <MessageCircle size={16} /> Abrir no WhatsApp
-              </button>
-            )}
-            <button
-              onClick={handleCopy}
-              className="bg-cs-accent hover:bg-cs-accent/80 text-black px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-xl shadow-cs-accent/20 flex items-center gap-2 cursor-pointer"
-            >
-              <Copy size={16} /> {copied ? 'Copiado!' : 'Copiar Texto'}
-            </button>
-          </div>
+        {/* Content Area with 2 Generated Versions */}
+        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-6">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+              <Sparkles size={36} className="text-cs-primary animate-spin" />
+              <p className="text-xs text-cs-text-secondary font-bold uppercase tracking-widest">
+                Gerando 2 versões estratégicas com IA...
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Versão 1 */}
+              <div className="bg-cs-bg border border-cs-border rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold text-cs-primary uppercase tracking-wider bg-cs-primary/10 px-2.5 py-1 rounded-lg">
+                      Versão 1 • Mais Direta
+                    </span>
+                  </div>
+                  <textarea
+                    value={versionA}
+                    onChange={e => setVersionA(e.target.value)}
+                    className="w-full h-56 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none resize-none custom-scrollbar leading-relaxed"
+                  />
+                </div>
+                <div className="flex gap-2 pt-2 border-t border-cs-border/40">
+                  <button
+                    onClick={() => handleCopy(versionA, true)}
+                    className="flex-1 py-2 bg-cs-surface hover:bg-cs-surface-hover border border-cs-border rounded-xl text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Copy size={13} /> {copiedA ? 'Copiado!' : 'Copiar'}
+                  </button>
+                  <button
+                    onClick={() => handleOpenWhatsApp(versionA)}
+                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <MessageCircle size={14} /> WhatsApp
+                  </button>
+                </div>
+              </div>
+
+              {/* Versão 2 */}
+              <div className="bg-cs-bg border border-cs-border rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider bg-purple-500/10 px-2.5 py-1 rounded-lg">
+                      Versão 2 • Mais Consultiva
+                    </span>
+                  </div>
+                  <textarea
+                    value={versionB}
+                    onChange={e => setVersionB(e.target.value)}
+                    className="w-full h-56 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none resize-none custom-scrollbar leading-relaxed"
+                  />
+                </div>
+                <div className="flex gap-2 pt-2 border-t border-cs-border/40">
+                  <button
+                    onClick={() => handleCopy(versionB, false)}
+                    className="flex-1 py-2 bg-cs-surface hover:bg-cs-surface-hover border border-cs-border rounded-xl text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Copy size={13} /> {copiedB ? 'Copiado!' : 'Copiar'}
+                  </button>
+                  <button
+                    onClick={() => handleOpenWhatsApp(versionB)}
+                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <MessageCircle size={14} /> WhatsApp
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-cs-border bg-cs-bg/50 flex items-center justify-between shrink-0">
+          <p className="text-[11px] text-cs-text-secondary">
+            Revise o texto gerado antes do disparo. Você pode editar diretamente nos campos acima.
+          </p>
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-xs font-bold text-cs-text-secondary hover:text-white uppercase tracking-wider cursor-pointer"
+          >
+            Fechar
+          </button>
         </div>
       </div>
     </div>

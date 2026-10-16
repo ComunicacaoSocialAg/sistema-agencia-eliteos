@@ -4,7 +4,33 @@ import { collection, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firesto
 import { db, isFirebaseConfigured } from '../lib/firebase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-const INITIAL_DEMO_CLIENTS = [
+const EXTENDED_META_KEY = 'csag_clients_extended_meta_v2';
+const CUSTOM_CLIENTS_KEY = 'csag_custom_clients';
+
+const ALIAS_GROUPS = [
+  ['client-alberto-brasil', 'client-dr-alberto', '87c0b28f-83f0-43ab-aefe-45bda539e8c2'],
+  ['client-dubola', 'ce45a984-093d-4484-9ee4-9177d56310e3']
+];
+
+export function getAliasesForId(id, name = '') {
+  const s = String(id || '').trim();
+  const n = String(name || '').toLowerCase();
+  for (const group of ALIAS_GROUPS) {
+    if (group.includes(s)) return group;
+  }
+  if (n.includes('alberto')) return ALIAS_GROUPS[0];
+  if (n.includes('dubola')) return ALIAS_GROUPS[1];
+  return s ? [s] : [];
+}
+
+export function areIdsMatching(aId, bId, aName = '', bName = '') {
+  if (aId && bId && String(aId) === String(bId)) return true;
+  const groupA = getAliasesForId(aId, aName);
+  const groupB = getAliasesForId(bId, bName);
+  return groupA.some(x => groupB.includes(x));
+}
+
+export const INITIAL_DEMO_CLIENTS = [
   {
     id: 'client-alberto-brasil',
     name: 'Dr. Alberto Brasil (Cirurgia Vascular)',
@@ -19,9 +45,17 @@ const INITIAL_DEMO_CLIENTS = [
     status: 'active',
     tone_of_voice: 'Bisturi Verbal (Excelência médica, tecnologia minimamente invasiva, rigor científico e compliance CFM 2.336/2023)',
     target_audience: 'Pacientes com sintomas de varizes, dores nas pernas, atletas e público de 35 a 65 anos em Poços de Caldas e região',
+    value_proposition: 'Diagnóstico vascular com Ecodoppler em tempo real e tratamento de varizes a Laser sem repouso prolongado no Edifício Unique.',
     strategic_goals: 'Posicionamento de alta autoridade científica com o Calendário Trimestral (36 posts) no Edifício Unique',
+    ai_instructions: 'Respeitar rigorosamente a Resolução CFM 2.336/2023: proibido antes e depois, proibido promessa de resultado, incluir CRM-MG 39529 e RQE 15412.',
     drive_url: 'https://drive.google.com/drive/folders/demo-dr-alberto',
     reportei_url: 'https://app.reportei.com/demo-dr-alberto',
+    forms_url: 'https://forms.gle/dralberto-onboarding',
+    reportei_config: {
+      meta_ad_account_id: 'act_6957602694317339',
+      instagram_handle: '@dralbertobr',
+      ga4_property_id: 'GA4-ALBERTO-39529'
+    },
     primary_color: '#0284c7',
     secondary_color: '#0f172a',
     accent_color: '#38bdf8',
@@ -45,9 +79,17 @@ const INITIAL_DEMO_CLIENTS = [
     status: 'active',
     tone_of_voice: 'Gourmet, Rústico-Chique e Apaixonado por Gastronomia',
     target_audience: 'Consumidores de gastronomia artesanal, chefs e supermercados premium',
+    value_proposition: 'Molhos artesanais nobres com ingredientes selecionados e identidade gastronômica marcante.',
     strategic_goals: 'Expandir presença nacional e gerar vendas B2B e e-commerce',
+    ai_instructions: 'Destacar textura, sabor artesanal, harmonização gastronômica e apelo visual apetitoso.',
     drive_url: 'https://drive.google.com/drive/folders/demo-dubola',
     reportei_url: 'https://app.reportei.com/demo-dubola',
+    forms_url: 'https://forms.gle/dubola-onboarding',
+    reportei_config: {
+      meta_ad_account_id: 'act_844396960524350',
+      instagram_handle: '@dubolamolhos',
+      ga4_property_id: 'GA4-DUBOLA-2026'
+    },
     primary_color: '#eab308',
     secondary_color: '#1c1917',
     accent_color: '#ef4444',
@@ -60,31 +102,125 @@ const INITIAL_DEMO_CLIENTS = [
   }
 ];
 
+function getExtendedMetaMap() {
+  try {
+    const raw = localStorage.getItem(EXTENDED_META_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveExtendedMetaForClient(client) {
+  if (!client || !client.id) return;
+  try {
+    const map = getExtendedMetaMap();
+    const aliases = getAliasesForId(client.id, client.name);
+    for (const key of aliases) {
+      map[key] = { ...(map[key] || {}), ...client };
+    }
+    localStorage.setItem(EXTENDED_META_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn('Erro ao salvar metadados estendidos do cliente:', e);
+  }
+}
+
+function enrichClientWithLocalMeta(rawClient) {
+  if (!rawClient) return rawClient;
+  const demoBaseline = INITIAL_DEMO_CLIENTS.find(d => areIdsMatching(d.id, rawClient.id, d.name, rawClient.name)) || {};
+  const metaMap = getExtendedMetaMap();
+  const aliases = getAliasesForId(rawClient.id, rawClient.name);
+  let savedMeta = {};
+  for (const key of aliases) {
+    if (metaMap[key]) {
+      savedMeta = { ...savedMeta, ...metaMap[key] };
+    }
+  }
+  return {
+    ...demoBaseline,
+    ...rawClient,
+    ...savedMeta,
+    id: rawClient.id, // Preserva o ID primário da lista
+    name: savedMeta.name || rawClient.name || demoBaseline.name,
+    monthly_fee: savedMeta.monthly_fee !== undefined ? Number(savedMeta.monthly_fee) : (rawClient.monthly_fee !== undefined ? Number(rawClient.monthly_fee) : demoBaseline.monthly_fee),
+    brand_color: savedMeta.brand_color || rawClient.brand_color || demoBaseline.brand_color || '#3b82f6',
+    primary_color: savedMeta.primary_color || savedMeta.brand_color || rawClient.brand_color || demoBaseline.primary_color || '#3b82f6',
+  };
+}
+
 function getStoredClients() {
   try {
-    const saved = localStorage.getItem('csag_custom_clients');
+    const saved = localStorage.getItem(CUSTOM_CLIENTS_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Filtrar prospects para que NUNCA apareçam na lista de clientes ativos
-        const onlyRealClients = parsed.filter(c => c.status !== 'prospect');
+        const onlyRealClients = parsed
+          .filter(c => c.status !== 'prospect')
+          .map(enrichClientWithLocalMeta);
         if (onlyRealClients.length > 0) return onlyRealClients;
       }
     }
   } catch (e) {
     console.warn(e);
   }
-  return INITIAL_DEMO_CLIENTS;
+  return INITIAL_DEMO_CLIENTS.map(enrichClientWithLocalMeta);
+}
+
+function broadcastClientsUpdate(nextClients) {
+  try {
+    const realOnly = nextClients.filter(c => c.status !== 'prospect');
+    localStorage.setItem(CUSTOM_CLIENTS_KEY, JSON.stringify(realOnly));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('csag:clients-updated', { detail: realOnly }));
+    }
+  } catch (e) {
+    console.warn('Erro ao propagar atualização de clientes:', e);
+  }
+}
+
+const SUPABASE_SAFE_COLUMNS = [
+  'name',
+  'contact_name',
+  'contact_email',
+  'contact_phone',
+  'monthly_fee',
+  'brand_color',
+  'status',
+  'tone_of_voice',
+  'target_audience',
+  'value_proposition',
+  'notes'
+];
+
+function buildSafeSupabasePayload(clientObj) {
+  const payload = {};
+  for (const col of SUPABASE_SAFE_COLUMNS) {
+    if (clientObj[col] !== undefined) {
+      payload[col] = clientObj[col];
+    }
+  }
+  return payload;
 }
 
 export function useClients() {
   const [clients, setClients] = useState(getStoredClients);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    const handleSync = (e) => {
+      if (Array.isArray(e?.detail)) {
+        setClients(e.detail);
+      } else {
+        setClients(getStoredClients());
+      }
+    };
+    window.addEventListener('csag:clients-updated', handleSync);
+    return () => window.removeEventListener('csag:clients-updated', handleSync);
+  }, []);
+
   const fetchSupabaseClients = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) return false;
     try {
-      // Buscar APENAS clientes reais (exclui prospects que pertencem apenas ao CRM)
       const { data, error } = await supabase
         .from('clients')
         .select('*')
@@ -92,8 +228,15 @@ export function useClients() {
         .order('created_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
-        setClients(data);
-        localStorage.setItem('csag_custom_clients', JSON.stringify(data));
+        const enrichedRemote = data.map(enrichClientWithLocalMeta);
+        // Preservar clientes criados localmente que ainda não estejam na resposta remota
+        const currentLocal = getStoredClients();
+        const localExtras = currentLocal.filter(
+          loc => !enrichedRemote.some(rem => areIdsMatching(rem.id, loc.id, rem.name, loc.name))
+        );
+        const merged = [...enrichedRemote, ...localExtras];
+        setClients(merged);
+        localStorage.setItem(CUSTOM_CLIENTS_KEY, JSON.stringify(merged));
         setLoading(false);
         return true;
       }
@@ -114,13 +257,13 @@ export function useClients() {
           setLoading(false);
         }
       });
-      return;
+      return () => { isMounted = false; };
     }
 
     if (isFirebaseConfigured && db) {
       const unsubscribe = onSnapshot(collection(db, 'clients'), (snapshot) => {
         const data = snapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .map(d => enrichClientWithLocalMeta({ id: d.id, ...d.data() }))
           .filter(c => c.status !== 'prospect');
         if (data.length > 0) {
           setClients(data);
@@ -140,22 +283,14 @@ export function useClients() {
     return () => { isMounted = false; };
   }, [fetchSupabaseClients]);
 
-  // Sincronizar clientes reais no localStorage (garantindo que prospect nunca seja salvo aqui)
-  useEffect(() => {
-    try {
-      const realOnly = clients.filter(c => c.status !== 'prospect');
-      localStorage.setItem('csag_custom_clients', JSON.stringify(realOnly));
-    } catch (e) {
-      console.warn('Erro ao salvar no localStorage:', e);
-    }
-  }, [clients]);
-
   const createClient = async (clientData) => {
-    const newClient = { 
-      ...clientData, 
+    const newClient = {
+      ...clientData,
       id: clientData.id || `client-${Date.now()}`,
-      status: clientData.status || 'active', 
+      status: clientData.status || 'active',
       monthly_fee: Number(clientData.monthly_fee) || 0,
+      billing_day: clientData.billing_day || '10',
+      contract_start_date: clientData.contract_start_date || new Date().toISOString().split('T')[0],
       brand_color: clientData.brand_color || '#3b82f6',
       primary_color: clientData.primary_color || clientData.brand_color || '#3b82f6',
       secondary_color: clientData.secondary_color || '#18181b',
@@ -163,89 +298,92 @@ export function useClients() {
       typography: clientData.typography || 'Inter / Plus Jakarta Sans',
       keywords: clientData.keywords || ['Comunicação', 'Marca', 'Performance'],
       assets: clientData.assets || [],
-      created_at: new Date().toISOString() 
+      created_at: new Date().toISOString()
     };
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('clients').insert([{
-          name: newClient.name,
-          contact_name: newClient.contact_name,
-          contact_email: newClient.contact_email || null,
-          contact_phone: newClient.contact_phone || null,
-          monthly_fee: newClient.monthly_fee,
-          brand_color: newClient.brand_color,
-          status: newClient.status,
-          tone_of_voice: newClient.tone_of_voice,
-          target_audience: newClient.target_audience,
-          value_proposition: newClient.value_proposition,
-          notes: newClient.notes
-        }]).select().single();
+        const safeInsert = buildSafeSupabasePayload(newClient);
+        const { data, error } = await supabase.from('clients').insert([safeInsert]).select().single();
 
-        if (!error && data) {
+        if (!error && data?.id) {
           newClient.id = data.id;
         }
-        setClients(prev => [newClient, ...prev]);
-        toast.success('Cliente cadastrado com sucesso!');
-        return newClient;
       } catch (e) {
-        console.warn('Erro no Supabase, salvando local:', e);
-        setClients(prev => [newClient, ...prev]);
-        toast.success('Cliente salvo localmente.');
-        return newClient;
+        console.warn('Erro no Supabase ao criar cliente, mantendo persistência local:', e);
+      }
+    } else if (isFirebaseConfigured && db) {
+      try {
+        const docRef = doc(collection(db, 'clients'));
+        newClient.id = docRef.id;
+        await setDoc(docRef, newClient);
+      } catch (e) {
+        console.warn('Erro no Firebase ao criar cliente, mantendo persistência local:', e);
       }
     }
 
-    if (!isFirebaseConfigured || !db) {
-      setClients(prev => [newClient, ...prev]);
-      toast.success('Cliente cadastrado com sucesso!');
-      return newClient;
-    }
-
-    try {
-      const docRef = doc(collection(db, 'clients'));
-      newClient.id = docRef.id;
-      await setDoc(docRef, newClient);
-      toast.success('Cliente cadastrado no banco!');
-      return newClient;
-    } catch (e) {
-      console.warn('Erro no Firebase, salvando local:', e);
-      setClients(prev => [newClient, ...prev]);
-      toast.success('Cliente salvo localmente.');
-      return newClient;
-    }
+    saveExtendedMetaForClient(newClient);
+    setClients(prev => {
+      const filtered = prev.filter(c => !areIdsMatching(c.id, newClient.id, c.name, newClient.name));
+      const next = [newClient, ...filtered];
+      broadcastClientsUpdate(next);
+      return next;
+    });
+    toast.success('Cliente cadastrado com sucesso!');
+    return newClient;
   };
 
   const updateClient = async (updated) => {
-    setClients(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c));
+    saveExtendedMetaForClient(updated);
+
+    let targetIdForRemote = updated.id;
+    setClients(prev => {
+      const next = prev.map(c => {
+        if (areIdsMatching(c.id, updated.id, c.name, updated.name)) {
+          targetIdForRemote = c.id;
+          const merged = {
+            ...c,
+            ...updated,
+            id: c.id,
+            primary_color: updated.primary_color || updated.brand_color || c.primary_color || c.brand_color,
+            brand_color: updated.brand_color || updated.primary_color || c.brand_color
+          };
+          saveExtendedMetaForClient(merged);
+          return merged;
+        }
+        return c;
+      });
+      broadcastClientsUpdate(next);
+      return next;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { id, ...data } = updated;
-        await supabase.from('clients').update(data).eq('id', id);
-        toast.success('Ficha do cliente atualizada!');
+        const safeUpdate = buildSafeSupabasePayload(updated);
+        if (Object.keys(safeUpdate).length > 0) {
+          await supabase.from('clients').update(safeUpdate).eq('id', targetIdForRemote);
+        }
       } catch (e) {
-        console.warn('Erro ao atualizar no Supabase:', e);
+        console.warn('Erro ao atualizar colunas básicas no Supabase:', e);
       }
-      return;
-    }
-
-    if (!isFirebaseConfigured || !db) {
       toast.success('Ficha do cliente atualizada!');
       return;
     }
 
-    try {
-      const { id, ...data } = updated;
-      const docRef = doc(db, 'clients', id);
-      await updateDoc(docRef, data);
-      toast.success('Ficha do cliente atualizada!');
-    } catch (e) {
-      console.warn('Erro ao atualizar no Firebase:', e);
+    if (isFirebaseConfigured && db) {
+      try {
+        const { id, ...data } = updated;
+        const docRef = doc(db, 'clients', id);
+        await updateDoc(docRef, data);
+      } catch (e) {
+        console.warn('Erro ao atualizar no Firebase:', e);
+      }
     }
+    toast.success('Ficha do cliente atualizada!');
   };
 
   const totalMRR = clients.filter(c => c.status === 'active').reduce((sum, c) => sum + (Number(c.monthly_fee) || 0), 0);
 
   return { clients, loading, createClient, updateClient, totalMRR, refetch: fetchSupabaseClients };
 }
+

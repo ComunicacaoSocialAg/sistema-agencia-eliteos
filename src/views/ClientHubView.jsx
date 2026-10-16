@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useClients } from '../hooks/useClients';
+import { useClients, areIdsMatching } from '../hooks/useClients';
 import { useClientPortal } from '../hooks/useClientPortal';
 import { useTasks } from '../hooks/useTasks';
 import { 
@@ -72,11 +72,9 @@ export default function ClientHubView() {
 
   const { dashboard, loading } = useClientPortal(client?.id);
 
-  // Filtra tarefas do cliente
+  // Filtra tarefas do cliente (com reconciliação de UUID e slug)
   const clientTasks = (allTasks || tasks).filter(t => 
-    t.client_id === client?.id || 
-    t.client?.name?.toLowerCase() === client?.name?.toLowerCase() ||
-    (t.client_name && t.client_name.toLowerCase() === client?.name?.toLowerCase())
+    areIdsMatching(t.client_id, client?.id, t.client_name || t.client?.name, client?.name)
   );
 
   const pendingApprovals = clientTasks.filter(t => 

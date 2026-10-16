@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Send, Bot, Loader2, Maximize2, Minimize2, ChevronDown, Mic, MicOff } from 'lucide-react';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
-import { chatWithAgent, isAIConfigured } from '../lib/gemini';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { chatWithAgentWithSystemPrompt, isAIConfigured } from '../lib/gemini';
 import { cn } from '../utils/cn';
 
 const MODULE_CONFIGS = {
@@ -370,22 +369,4 @@ function getQuickPrompts(module) {
   ];
 }
 
-// Chat function com system prompt customizado, chamando a Edge Function
-// `ai-chat` (o servidor decide Gemini vs OpenAI e guarda as chaves).
-// Antes, esta função importava @google/generative-ai e lia
-// VITE_GEMINI_API_KEY direto no navegador — era uma segunda chave
-// exposta no bundle, fora do módulo lib/gemini.js. Removido.
-async function chatWithAgentWithSystemPrompt(systemPrompt, history, userMessage, provider = 'auto') {
-  if (!isSupabaseConfigured) {
-    throw new Error('Serviço de IA indisponível. Supabase não configurado.');
-  }
 
-  const { data, error } = await supabase.functions.invoke('ai-chat', {
-    body: { systemPrompt, conversationHistory: history, userMessage, preferredProvider: provider },
-  });
-
-  if (error) throw new Error(error.message || 'Falha ao chamar a IA.');
-  if (data?.error) throw new Error(data.error);
-
-  return { text: data.text };
-}

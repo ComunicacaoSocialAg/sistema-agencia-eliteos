@@ -38,6 +38,7 @@ import { useClientPortal } from '../hooks/useClientPortal';
 import { useTasks } from '../hooks/useTasks';
 import { useTeam } from '../hooks/useTeam';
 import { useInvoices } from '../hooks/useInvoices';
+import { areIdsMatching } from '../hooks/useClients';
 import { cn } from '../utils/cn';
 import NewTaskModal from './NewTaskModal';
 
@@ -97,7 +98,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
   const { setContext } = useAIAssistant();
   const { tasks, createTask } = useTasks(client.id);
   const { invoices } = useInvoices();
-  const clientInvoices = invoices.filter(inv => inv.client_id === client.id || (inv.client && inv.client.name === client.name));
+  const clientInvoices = invoices.filter(inv => areIdsMatching(inv.client_id, client.id, inv.client?.name || inv.client_name, client.name));
   const [showNPS, setShowNPS] = useState(false);
   const [showNewDemand, setShowNewDemand] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -294,8 +295,9 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
 
         {activeTab === 'overview' && <OverviewTab client={client} isPortal={isPortal} dashboard={dashboard} invoices={clientInvoices} tasks={tasks} />}
         {activeTab === 'dna' && (
-        <DNATab client={client} createTask={createTask} />
-      )}  {activeTab === 'roadmap' && <StrategicRoadmap clientId={client.id} client={client} />}
+          <DNATab client={client} createTask={createTask} onUpdateClient={handleUpdateClient} />
+        )}
+        {activeTab === 'roadmap' && <StrategicRoadmap clientId={client.id} client={client} />}
         {activeTab === 'production' && <ProductionTab client={client} tasks={tasks} />}
         {activeTab === 'reports' && (
           <div className="p-12 text-center bg-cs-surface border border-cs-border rounded-3xl">
@@ -861,12 +863,44 @@ function DownloadIcon({ size }) {
   );
 }
 
-function DNATab({ client, createTask }) {
+function DNATab({ client, createTask, onUpdateClient }) {
   const [formsLink, setFormsLink] = useState(client.forms_url || '');
   const [pastedAnswers, setPastedAnswers] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiPlan, setAiPlan] = useState('');
   const [isApproving, setIsApproving] = useState(false);
+  const [isEditingDna, setIsEditingDna] = useState(false);
+  const [dnaForm, setDnaForm] = useState({
+    target_audience: client.target_audience || '',
+    tone_of_voice: client.tone_of_voice || '',
+    strategic_goals: client.strategic_goals || '',
+    value_proposition: client.value_proposition || ''
+  });
+
+  useEffect(() => {
+    setFormsLink(client.forms_url || '');
+    setDnaForm({
+      target_audience: client.target_audience || '',
+      tone_of_voice: client.tone_of_voice || '',
+      strategic_goals: client.strategic_goals || '',
+      value_proposition: client.value_proposition || ''
+    });
+  }, [client]);
+
+  const handleSaveFormsLink = () => {
+    if (onUpdateClient) {
+      onUpdateClient({ ...client, forms_url: formsLink });
+      toast.success('Link do Forms salvo com sucesso!');
+    }
+  };
+
+  const handleSaveDna = () => {
+    if (onUpdateClient) {
+      onUpdateClient({ ...client, ...dnaForm });
+      setIsEditingDna(false);
+      toast.success('Diretrizes de DNA atualizadas com sucesso!');
+    }
+  };
 
   const copyQuestions = () => {
     const questions = `1. Qual é a principal dor que o seu produto/serviço resolve hoje?
@@ -875,17 +909,17 @@ function DNATab({ client, createTask }) {
 4. Quais são os 3 produtos/serviços mais rentáveis (Curva A)?
 5. Quais objeções de vendas sua equipe mais escuta?`;
     navigator.clipboard.writeText(questions);
-    alert('Perguntas copiadas! Cole no seu Google Forms.');
+    toast.success('Perguntas copiadas! Cole no seu Google Forms.');
   };
 
   const handleAnalyze = async () => {
-    if (!pastedAnswers) return alert('Cole as respostas do cliente primeiro.');
+    if (!pastedAnswers) return toast.error('Cole as respostas do cliente primeiro.');
     setIsAnalyzing(true);
     try {
       const { text } = await generateStrategicPlan(client, pastedAnswers);
       setAiPlan(text);
     } catch (err) {
-      alert('Erro ao analisar: ' + err.message);
+      toast.error('Erro ao analisar: ' + err.message);
     } finally {
       setIsAnalyzing(false);
     }
@@ -981,7 +1015,7 @@ function DNATab({ client, createTask }) {
                 <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1">Link do Forms do Cliente</label>
                 <div className="flex gap-2">
                   <input type="url" value={formsLink} onChange={e => setFormsLink(e.target.value)} placeholder="https://forms.google.com/..." className="flex-1 bg-cs-surface border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:border-cs-primary focus:outline-none" />
-                  <button className="bg-cs-primary text-white px-4 rounded-xl text-xs font-bold hover:bg-cs-primary-hover transition-colors">Salvar</button>
+                  <button onClick={handleSaveFormsLink} className="bg-cs-primary text-white px-4 rounded-xl text-xs font-bold hover:bg-cs-primary-hover transition-colors">Salvar</button>
                 </div>
               </div>
 
@@ -1041,23 +1075,101 @@ function DNATab({ client, createTask }) {
         </div>
       </section>
 
-      {/* Legacy Strategic Info (View Only) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
-        <div className="bg-cs-surface border border-cs-border rounded-3xl p-6">
-          <h4 className="text-white font-bold mb-4 flex items-center gap-2">
-            <Users size={18} className="text-blue-400" /> Público-Alvo (Cadastrado)
-          </h4>
-          <p className="text-sm text-cs-text-secondary leading-relaxed">
-            {client.target_audience || "Definição de público pendente. Use a IA acima para gerar."}
-          </p>
+      {/* Diretrizes de DNA da Marca (Editáveis com Persistência) */}
+      <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 shadow-xl space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-white font-bold text-base flex items-center gap-2">
+              <Sparkles size={18} className="text-cs-primary" /> Cérebro & DNA da Marca
+            </h4>
+            <p className="text-xs text-cs-text-secondary">Diretrizes estratégicas que guiam a produção, tom de voz e IA da conta.</p>
+          </div>
+          <button
+            onClick={() => {
+              if (isEditingDna) {
+                handleSaveDna();
+              } else {
+                setIsEditingDna(true);
+              }
+            }}
+            className="px-4 py-2 bg-cs-primary hover:bg-cs-primary/90 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+          >
+            {isEditingDna ? 'SALVAR DIRETRIZES' : 'EDITAR DIRETRIZES'}
+          </button>
         </div>
-        <div className="bg-cs-surface border border-cs-border rounded-3xl p-6">
-          <h4 className="text-white font-bold mb-4 flex items-center gap-2">
-            <MessageSquare size={18} className="text-purple-400" /> Tom de Voz (Cadastrado)
-          </h4>
-          <p className="text-sm text-cs-text-secondary leading-relaxed">
-            {client.tone_of_voice || "Definição de tom de voz pendente. Use a IA acima para gerar."}
-          </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
+            <h5 className="text-xs font-bold text-white flex items-center gap-2">
+              <Users size={16} className="text-blue-400" /> Público-Alvo
+            </h5>
+            {isEditingDna ? (
+              <textarea
+                value={dnaForm.target_audience}
+                onChange={e => setDnaForm(prev => ({ ...prev, target_audience: e.target.value }))}
+                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
+                placeholder="Descreva o público-alvo, dores e faixa etária..."
+              />
+            ) : (
+              <p className="text-xs text-cs-text-secondary leading-relaxed">
+                {client.target_audience || "Público-alvo não configurado. Clique em Editar para preencher."}
+              </p>
+            )}
+          </div>
+
+          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
+            <h5 className="text-xs font-bold text-white flex items-center gap-2">
+              <MessageSquare size={16} className="text-purple-400" /> Tom de Voz
+            </h5>
+            {isEditingDna ? (
+              <textarea
+                value={dnaForm.tone_of_voice}
+                onChange={e => setDnaForm(prev => ({ ...prev, tone_of_voice: e.target.value }))}
+                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
+                placeholder="Descreva o tom de voz, estilo de linguagem e postura..."
+              />
+            ) : (
+              <p className="text-xs text-cs-text-secondary leading-relaxed">
+                {client.tone_of_voice || "Tom de voz não configurado. Clique em Editar para preencher."}
+              </p>
+            )}
+          </div>
+
+          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
+            <h5 className="text-xs font-bold text-white flex items-center gap-2">
+              <Target size={16} className="text-green-400" /> Proposta de Valor
+            </h5>
+            {isEditingDna ? (
+              <textarea
+                value={dnaForm.value_proposition}
+                onChange={e => setDnaForm(prev => ({ ...prev, value_proposition: e.target.value }))}
+                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
+                placeholder="Qual o diferencial único que resolve a dor do cliente..."
+              />
+            ) : (
+              <p className="text-xs text-cs-text-secondary leading-relaxed">
+                {client.value_proposition || "Proposta de valor não configurada. Clique em Editar para preencher."}
+              </p>
+            )}
+          </div>
+
+          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
+            <h5 className="text-xs font-bold text-white flex items-center gap-2">
+              <Rocket size={16} className="text-orange-400" /> Objetivos Estratégicos
+            </h5>
+            {isEditingDna ? (
+              <textarea
+                value={dnaForm.strategic_goals}
+                onChange={e => setDnaForm(prev => ({ ...prev, strategic_goals: e.target.value }))}
+                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
+                placeholder="Principais metas e KPIs estratégicos da conta..."
+              />
+            ) : (
+              <p className="text-xs text-cs-text-secondary leading-relaxed">
+                {client.strategic_goals || "Objetivos estratégicos não configurados. Clique em Editar para preencher."}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1311,8 +1423,8 @@ function VaultTab({ client, isPortal }) {
                   </div>
                   <div className="flex items-center gap-2 bg-cs-surface px-3 py-2 rounded-lg border border-cs-border relative">
                     <span className="text-[10px] text-cs-text-secondary w-12">Senha:</span>
-                    <span className="text-sm text-white font-mono flex-1 break-all">{showPassword[item.id] ? item.encrypted_password : '••••••••••••'}</span>
-                    <button onClick={() => copyToClipboard(item.encrypted_password, 'Senha')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1" title="Copiar senha">
+                    <span className="text-sm text-white font-mono flex-1 break-all">{showPassword[item.id] ? decryptSecret(item.encrypted_password) : '••••••••••••'}</span>
+                    <button onClick={() => copyToClipboard(decryptSecret(item.encrypted_password), 'Senha')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1" title="Copiar senha">
                       <Copy size={14} />
                     </button>
                     <button onClick={() => togglePassword(item.id)} className="text-cs-text-secondary hover:text-white transition-colors p-1">

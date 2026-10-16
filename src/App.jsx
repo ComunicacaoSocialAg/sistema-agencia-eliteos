@@ -90,7 +90,7 @@ function AppShell() {
             <X size={20} />
           </button>
           <div className="flex items-center gap-3 mb-1">
-            <img src="/logo.png" alt="Comunica Ag" className="h-9 shrink-0" />
+            <img src="/logo.png?v=4" alt="Comunica Ag" className="h-9 shrink-0 object-contain" />
             <span className="font-bold text-lg tracking-wide text-white">Comunica OS</span>
           </div>
           <div className="text-[11px] text-cs-text-secondary pl-12">comunicacaosocialag.com.br</div>
@@ -360,7 +360,7 @@ function AuthGate() {
     return (
       <div className="min-h-screen bg-cs-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <img src="/logo.png" alt="Comunica" className="h-12 object-contain" />
+          <img src="/logo.png?v=4" alt="Comunica" className="h-12 object-contain" />
           <div className="w-40 h-0.5 bg-cs-surface rounded-full overflow-hidden">
             <div className="h-full bg-gradient-to-r from-cs-primary to-cs-accent rounded-full w-3/4 animate-pulse"></div>
           </div>

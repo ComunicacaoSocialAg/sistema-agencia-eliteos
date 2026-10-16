@@ -51,6 +51,8 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCopy, setGeneratedCopy] = useState('');
+  const [isAddingItem, setIsAddingItem] = useState(false);
+  const [newItemText, setNewItemText] = useState('');
 
   if (!task) return null;
 
@@ -58,6 +60,21 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
   const checklist = Array.isArray(task.checklist) ? task.checklist : [];
   const comments = Array.isArray(task.comments) ? task.comments : [];
   const clientName = task.client?.name || (typeof task.client === 'string' ? task.client : 'Cliente');
+
+  const handleAddChecklistItem = () => {
+    if (!newItemText.trim()) return;
+    const newItem = {
+      id: `chk-${Date.now()}`,
+      text: newItemText.trim(),
+      label: newItemText.trim(),
+      is_done: false
+    };
+    const updatedChecklist = [...checklist, newItem];
+    onUpdate({ ...task, checklist: updatedChecklist });
+    setNewItemText('');
+    setIsAddingItem(false);
+    toast.success('Item adicionado ao checklist!');
+  };
   const taskIdDisplay = (task.id || 'TASK').toString().slice(0, 4);
   const deadlineDate = safeParseISO(task.deadline);
   const tagColorClass = TAG_COLORS[task.tag] || 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
@@ -124,7 +141,10 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
             <h2 className="text-3xl font-bold text-white tracking-tight leading-tight">{task.title || 'Sem título'}</h2>
           </div>
           <div className="flex items-center gap-2">
-             <button className="bg-cs-bg hover:bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
+             <button 
+               onClick={() => toast.success(`Tempo registrado na tarefa: ${Math.round((task.tracked_seconds || 0) / 60)} min`)}
+               className="bg-cs-bg hover:bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+             >
                <History size={14} /> LOG
              </button>
              <button onClick={onClose} className="text-cs-text-secondary hover:text-white p-2.5 hover:bg-white/5 rounded-xl transition-all">
@@ -227,10 +247,30 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
                       <h3 className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest flex items-center gap-2">
                         <CheckCircle2 size={14} className="text-cs-primary" /> Checklist de Produção
                       </h3>
-                      <button className="text-[10px] text-cs-primary hover:text-white font-bold flex items-center gap-1 transition-colors">
+                      <button 
+                        onClick={() => setIsAddingItem(true)}
+                        className="text-[10px] text-cs-primary hover:text-white font-bold flex items-center gap-1 transition-colors"
+                      >
                         <Plus size={12} /> ADICIONAR ITEM
                       </button>
                     </div>
+
+                    {isAddingItem && (
+                      <div className="flex gap-2 p-3 bg-cs-surface border border-cs-primary/40 rounded-2xl animate-in fade-in">
+                        <input
+                          type="text"
+                          value={newItemText}
+                          onChange={e => setNewItemText(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddChecklistItem()}
+                          placeholder="Descreva o novo item do checklist..."
+                          className="flex-1 bg-transparent text-xs text-white focus:outline-none px-2"
+                          autoFocus
+                        />
+                        <button onClick={handleAddChecklistItem} className="px-3 py-1.5 bg-cs-primary text-white rounded-xl text-xs font-bold">Adicionar</button>
+                        <button onClick={() => setIsAddingItem(false)} className="px-3 py-1.5 text-cs-text-secondary hover:text-white text-xs">Cancelar</button>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-3">
                       {checklist.map(item => (
                         <div 
@@ -248,11 +288,11 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
                             {item.is_done && <CheckCircle2 size={16} />}
                           </div>
                           <span className={cn("text-sm", item.is_done ? "line-through text-cs-text-secondary" : "text-white font-semibold")}>
-                            {item.label}
+                            {item.text || item.label || 'Item do checklist'}
                           </span>
                         </div>
                       ))}
-                      {checklist.length === 0 && (
+                      {checklist.length === 0 && !isAddingItem && (
                         <div className="p-8 border border-dashed border-cs-border rounded-2xl text-center">
                           <p className="text-xs text-cs-text-secondary italic">Nenhum item definido para esta tarefa.</p>
                         </div>
@@ -319,7 +359,21 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
                         <Paperclip size={18} className="text-zinc-400" />
                         Materiais de Apoio & Referências
                       </h3>
-                      <button className="text-[10px] font-bold text-cs-primary hover:text-white transition-colors uppercase tracking-widest bg-cs-primary/10 px-4 py-2 rounded-lg">
+                      <button 
+                        onClick={() => {
+                          const name = window.prompt('Nome do material ou referência:');
+                          if (name) {
+                            const url = window.prompt('Link ou URL do material (opcional):') || '';
+                            const current = task.attachments || [];
+                            onUpdate({
+                              ...task,
+                              attachments: [...current, { id: `att-${Date.now()}`, name, url, size: 'Link externo' }]
+                            });
+                            toast.success('Material de apoio adicionado!');
+                          }
+                        }}
+                        className="text-[10px] font-bold text-cs-primary hover:text-white transition-colors uppercase tracking-widest bg-cs-primary/10 px-4 py-2 rounded-lg cursor-pointer"
+                      >
                         + ADICIONAR MATERIAL
                       </button>
                     </div>
@@ -384,8 +438,22 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
                   {columns.map(c => (
                     <button 
                       key={c.id} 
-                      disabled={task.status === c.id}
-                      onClick={() => onUpdate({ ...task, status: c.id })}
+                      onClick={() => {
+                        const statusToDemandMap = {
+                          'backlog': 'backlog',
+                          'a-fazer': 'a_fazer',
+                          'em-producao': 'em_producao',
+                          'revisao-interna': 'revisao_interna',
+                          'aguardando-cliente': 'aguardando_cliente',
+                          'ajustes': 'ajustes',
+                          'concluido': 'concluido'
+                        };
+                        onUpdate({
+                          ...task,
+                          status: c.id,
+                          demand_status: statusToDemandMap[c.id] || c.id.replace(/-/g, '_')
+                        });
+                      }}
                       className={cn(
                         "w-full px-5 py-4 rounded-2xl text-xs font-bold transition-all text-left flex items-center justify-between border",
                         task.status === c.id 

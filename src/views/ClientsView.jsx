@@ -20,7 +20,7 @@ import {
   Calendar,
   FolderOpen
 } from 'lucide-react';
-import { useClients } from '../hooks/useClients';
+import { useClients, areIdsMatching } from '../hooks/useClients';
 import { useIntelligence } from '../hooks/useIntelligence';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useProjects } from '../hooks/useProjects';
@@ -388,8 +388,13 @@ export default function ClientsView() {
   const [search, setSearch] = useState('');
   
   const [showNewClientModal, setShowNewClientModal] = useState(false);
-  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [selectedClient, setSelectedClient] = useState(null);
+  const [selectedClientId, setSelectedClientId] = useState(null);
+  const selectedClient = selectedClientId 
+    ? (clients.find(c => areIdsMatching(c.id, selectedClientId, c.name, '')) || clients.find(c => c.id === selectedClientId) || null)
+    : null;
+  const setSelectedClient = (client) => {
+    setSelectedClientId(client ? client.id : null);
+  };
   const [clientInitialTab, setClientInitialTab] = useState('overview');
 
   const pendingDeliverables = (deliverables || []).filter(d => d.status === 'pendente');

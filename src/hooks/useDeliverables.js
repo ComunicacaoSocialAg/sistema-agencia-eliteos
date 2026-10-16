@@ -314,10 +314,15 @@ export function useAllDeliverables() {
         .from('task_deliverables')
         .select('*')
         .order('created_at', { ascending: false });
+      const localItems = getStoredDeliverables();
       if (error || !data) {
-        setDeliverables(getStoredDeliverables());
+        setDeliverables(localItems);
       } else {
-        setDeliverables(data);
+        const remoteIds = new Set(data.map(d => d.id));
+        const localExtras = localItems.filter(l => !remoteIds.has(l.id));
+        const merged = [...data, ...localExtras];
+        setDeliverables(merged);
+        saveStoredDeliverables(merged);
       }
     } catch {
       setDeliverables(getStoredDeliverables());

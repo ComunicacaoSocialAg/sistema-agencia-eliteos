@@ -329,9 +329,9 @@ export default function LoginView() {
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
           <img 
-            src="/logo.png" 
+            src="/logo.png?v=4" 
             alt="Comunicação Social Ag" 
-            className="h-24 mx-auto mb-5 logo-animated" 
+            className="h-20 mx-auto mb-5 logo-animated object-contain" 
           />
           <h1 className="text-2xl font-black text-white mb-1 tracking-tight" style={{animation: 'cardSlide 0.5s ease-out 0.2s both'}}>Comunica OS</h1>
           <p className="text-cs-text-secondary text-sm" style={{animation: 'cardSlide 0.5s ease-out 0.4s both'}}>Sistema de Gestão da Agência</p>

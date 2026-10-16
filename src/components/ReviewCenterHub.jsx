@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDeliverables, useAllDeliverables } from '../hooks/useDeliverables';
-import { useClients } from '../hooks/useClients';
+import { useClients, areIdsMatching } from '../hooks/useClients';
 import { useTasks } from '../hooks/useTasks';
 import { cn } from '../utils/cn';
 import ApprovalFlow from './ApprovalFlow';
@@ -50,16 +50,27 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
   // Mapear cada entregável com sua respectiva tarefa e cliente
   const mappedDeliverables = useMemo(() => {
     return deliverables.map(deliv => {
+      const isDubolaHint = (deliv.file_name || '').toLowerCase().includes('dubola') || 
+                           (deliv.file_name || '').toLowerCase().includes('habanero') || 
+                           (deliv.file_name || '').toLowerCase().includes('rótulo') || 
+                           (deliv.file_name || '').toLowerCase().includes('molho');
+      const isAlbertoHint = (deliv.file_name || '').toLowerCase().includes('alberto') || 
+                            (deliv.file_name || '').toLowerCase().includes('varizes') || 
+                            (deliv.file_name || '').toLowerCase().includes('laser');
+
       const task = combinedTasks.find(t => t.id === deliv.task_id) || {
         id: deliv.task_id,
         title: deliv.file_name || 'Demanda sem título',
-        client_id: clients[0]?.id || 'ce45a984-093d-4484-9ee4-9177d56310e3',
-        client_name: clients[0]?.name || 'Dubola Molhos Especiais'
+        client_id: isDubolaHint ? 'client-dubola' : (isAlbertoHint ? 'client-alberto-brasil' : (deliv.client_id || 'client-alberto-brasil')),
+        client_name: isDubolaHint ? 'Dubola Molhos Especiais' : (isAlbertoHint ? 'Dr. Alberto Brasil (Cirurgia Vascular)' : (deliv.client_name || 'Dr. Alberto Brasil (Cirurgia Vascular)'))
       };
 
-      const client = clients.find(c => c.id === task.client_id || c.name === task.client_name || c.name === task.client?.name) || {
-        id: task.client_id || 'demo-client',
-        name: task.client_name || task.client?.name || 'Cliente Geral',
+      const targetClientId = deliv.client_id || task.client_id;
+      const targetClientName = deliv.client_name || task.client_name || task.client?.name;
+
+      const client = clients.find(c => areIdsMatching(c.id, targetClientId, c.name, targetClientName)) || {
+        id: targetClientId || 'demo-client',
+        name: targetClientName || 'Cliente Geral',
         brand_color: '#3b82f6'
       };
 

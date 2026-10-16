@@ -57,22 +57,58 @@ export default function PublicApprovalView() {
       }
 
       try {
-        // Fetch Task from Supabase
-        const { data: taskData } = await supabase
-          .from('tasks')
-          .select('*, client:clients(name)')
-          .eq('id', taskId)
-          .single();
-        
-        setTask(taskData);
+        let taskData = null;
+        let versionsData = null;
 
-        // Fetch Deliverables from Supabase
-        const { data: versionsData } = await supabase
-          .from('task_deliverables')
-          .select('*')
-          .eq('task_id', taskId)
-          .order('version_number', { ascending: false });
-        
+        if (isSupabaseConfigured && supabase) {
+          try {
+            const { data: remoteTask } = await supabase
+              .from('tasks')
+              .select('*, client:clients(name)')
+              .eq('id', taskId)
+              .single();
+            taskData = remoteTask;
+
+            const { data: remoteVersions } = await supabase
+              .from('task_deliverables')
+              .select('*')
+              .eq('task_id', taskId)
+              .order('version_number', { ascending: false });
+            versionsData = remoteVersions;
+          } catch (e) {
+            console.warn('Erro ao consultar Supabase em PublicApprovalView:', e);
+          }
+        }
+
+        // Fallback robusto para localStorage caso não esteja no Supabase
+        if (!taskData) {
+          const rawTasks = localStorage.getItem('csag_custom_tasks');
+          if (rawTasks) {
+            const allTasks = JSON.parse(rawTasks);
+            taskData = allTasks.find(t => t.id === taskId) || null;
+          }
+        }
+
+        if (!versionsData || versionsData.length === 0) {
+          const rawDeliv = localStorage.getItem('csag_custom_deliverables') || localStorage.getItem('csag_deliverables_v2');
+          if (rawDeliv) {
+            const allDeliv = JSON.parse(rawDeliv);
+            versionsData = allDeliv.filter(d => d.task_id === taskId);
+          }
+          if ((!versionsData || versionsData.length === 0) && taskData) {
+            versionsData = [{
+              id: `deliv-${taskData.id}`,
+              task_id: taskData.id,
+              version_number: 1,
+              file_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop',
+              file_name: taskData.title || 'Peça Criativa',
+              status: taskData.status === 'concluido' ? 'aprovado' : (taskData.status === 'ajustes' ? 'ajustes' : 'pendente'),
+              created_at: taskData.created_at || new Date().toISOString()
+            }];
+          }
+        }
+
+        setTask(taskData);
         setVersions(versionsData || []);
       } catch (err) {
         console.error(err);
@@ -287,7 +323,7 @@ export default function PublicApprovalView() {
                   </div>
                 )}
 
-                {latestVersion.status === 'ajustes' || latestVersion.status === 'reprovado' && (
+                {(latestVersion.status === 'ajustes' || latestVersion.status === 'reprovado') && (
                   <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 flex items-center gap-4 animate-in zoom-in-95">
                     <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center text-red-400">
                       <AlertCircle size={24} />
