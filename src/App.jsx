@@ -20,6 +20,7 @@ import DashboardView from './views/DashboardView';
 import BrandCenterView from './views/BrandCenterView';
 import PaidMediaView from './views/PaidMediaView';
 import PublicApprovalView from './views/PublicApprovalView';
+import PublicClientOnboardingView from './views/PublicClientOnboardingView';
 import BuzzMonitorView from './views/BuzzMonitorView';
 import { ActiveClientProvider, useActiveClient } from './contexts/ActiveClientContext';
 import { useRecurring } from './hooks/useRecurring';
@@ -57,7 +58,14 @@ function AppShell() {
   // Guard: esperar até que o perfil esteja carregado
   const effectiveRole = role || 'admin';
 
-  const [activeView, setActiveView] = useState(effectiveRole === 'client' ? 'hub' : 'dashboard');
+  const [activeView, setActiveView] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csag_active_view');
+      return saved || (effectiveRole === 'client' ? 'hub' : 'dashboard');
+    } catch {
+      return effectiveRole === 'client' ? 'hub' : 'dashboard';
+    }
+  });
 
   useEffect(() => {
     if (effectiveRole !== 'client') {
@@ -115,6 +123,11 @@ function AppShell() {
                 key={item.id}
                 onClick={() => {
                   setActiveView(item.id);
+                  try {
+                    localStorage.setItem('csag_active_view', item.id);
+                  } catch {
+                    // ignore
+                  }
                   setIsMobileMenuOpen(false);
                 }}
                 className={cn(
@@ -263,19 +276,21 @@ function AppShell() {
         </header>
 
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
-          {validView === 'dashboard' && <DashboardView />}
-          {validView === 'buzzmonitor' && <BuzzMonitorView />}
-          {validView === 'clientes' && <ClientsView />}
-          {validView === 'brandcenter' && <BrandCenterView />}
-          {validView === 'producao' && <ProductionView />}
-          {validView === 'crm' && <CRMView />}
-          {validView === 'midia' && <PaidMediaView />}
-          {validView === 'hub' && <ClientHubView />}
-          {validView === 'financeiro' && <FinanceView />}
-          {validView === 'relatorios' && <ReportsView />}
-          {validView === 'gestao' && <ManagementView />}
-          {validView === 'ia' && <AILayerView />}
-          {validView === 'sandbox' && <SandboxView />}
+          <ViewErrorBoundary viewKey={validView}>
+            {validView === 'dashboard' && <DashboardView />}
+            {validView === 'buzzmonitor' && <BuzzMonitorView />}
+            {validView === 'clientes' && <ClientsView />}
+            {validView === 'brandcenter' && <BrandCenterView />}
+            {validView === 'producao' && <ProductionView />}
+            {validView === 'crm' && <CRMView />}
+            {validView === 'midia' && <PaidMediaView />}
+            {validView === 'hub' && <ClientHubView />}
+            {validView === 'financeiro' && <FinanceView />}
+            {validView === 'relatorios' && <ReportsView />}
+            {validView === 'gestao' && <ManagementView />}
+            {validView === 'ia' && <AILayerView />}
+            {validView === 'sandbox' && <SandboxView />}
+          </ViewErrorBoundary>
         </div>
       </main>
 
@@ -310,6 +325,57 @@ function AppShell() {
   );
 }
 
+class ViewErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("View Render Error:", error, errorInfo);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.viewKey !== this.props.viewKey && this.state.hasError) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-full flex items-center justify-center p-6 bg-cs-bg">
+          <div className="bg-cs-surface border border-cs-border rounded-3xl p-8 max-w-md w-full text-center shadow-xl">
+            <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+              <span className="text-xl">⚠️</span>
+            </div>
+            <h3 className="text-base font-bold text-white mb-2">Erro ao carregar módulo</h3>
+            <p className="text-xs text-cs-text-secondary mb-4 leading-relaxed">
+              Ocorreu uma falha temporária ao renderizar este módulo.
+            </p>
+            <div className="bg-black/50 p-3 rounded-xl text-left overflow-auto mb-5 border border-red-500/10 max-h-32">
+              <code className="text-red-400 text-[11px] whitespace-pre-wrap font-mono">
+                {this.state.error?.message || String(this.state.error)}
+              </code>
+            </div>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="bg-cs-primary hover:bg-cs-primary-hover text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all w-full cursor-pointer shadow-lg shadow-cs-primary/10"
+            >
+              Tentar Novamente
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 class GlobalErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -339,12 +405,20 @@ class GlobalErrorBoundary extends React.Component {
                   {this.state.error?.toString()}
                 </code>
              </div>
-             <button 
-               onClick={() => window.location.reload()}
-               className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-widest transition-all w-full"
-             >
-               Recarregar Sistema
-             </button>
+             <div className="flex items-center gap-3">
+               <button 
+                 onClick={() => this.setState({ hasError: false, error: null })}
+                 className="bg-cs-primary hover:bg-cs-primary-hover text-black px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-widest transition-all flex-1 cursor-pointer"
+               >
+                 Tentar Novamente
+               </button>
+               <button 
+                 onClick={() => window.location.reload()}
+                 className="bg-cs-surface hover:bg-white/5 border border-cs-border text-cs-text-secondary hover:text-white px-5 py-3 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer"
+               >
+                 Recarregar
+               </button>
+             </div>
           </div>
         </div>
       );
@@ -373,6 +447,8 @@ function AuthGate() {
   return (
     <Routes>
       <Route path="/aprovar/:taskId" element={<PublicApprovalView />} />
+      <Route path="/cadastro" element={<PublicClientOnboardingView />} />
+      <Route path="/onboarding" element={<PublicClientOnboardingView />} />
       <Route path="/login" element={!user ? <LoginView /> : <Navigate to="/" />} />
       <Route path="/*" element={user ? <AppShell /> : <Navigate to="/login" />} />
     </Routes>

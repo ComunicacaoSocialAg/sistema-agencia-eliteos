@@ -165,11 +165,14 @@ export function useTasks(clientId, options = {}) {
     return () => unsubscribe();
   }, [clientId, showArchived]);
 
-  // Persistência local em modo demo e sincronização reativa
+  // Persistência local em modo demo e sincronização reativa sem loop
   useEffect(() => {
     try {
-      localStorage.setItem('csag_custom_tasks', JSON.stringify(tasks));
-      window.dispatchEvent(new CustomEvent('csag_tasks_updated', { detail: tasks }));
+      const serialized = JSON.stringify(tasks);
+      if (localStorage.getItem('csag_custom_tasks') !== serialized) {
+        localStorage.setItem('csag_custom_tasks', serialized);
+        window.dispatchEvent(new CustomEvent('csag_tasks_updated', { detail: tasks }));
+      }
     } catch (e) {
       console.warn(e);
     }
@@ -179,10 +182,12 @@ export function useTasks(clientId, options = {}) {
     const handleUpdate = () => {
       try {
         const saved = localStorage.getItem('csag_custom_tasks');
-        if (saved) {
+        if (!saved) return;
+        setTasks(prev => {
+          if (JSON.stringify(prev) === saved) return prev;
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) setTasks(parsed);
-        }
+          return Array.isArray(parsed) ? parsed : prev;
+        });
       } catch (e) {
         console.warn(e);
       }

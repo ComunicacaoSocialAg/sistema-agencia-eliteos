@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { 
-  BarChart2, FileText, Download, CheckCircle2, Clock, 
-  Send, Copy, Printer, Target, Sparkles, AlertCircle, 
-  TrendingUp, Calendar, ShieldCheck, ExternalLink, Save,
-  Users, Eye, ThumbsUp, MessageSquare, Share2, Bookmark,
-  RefreshCw, Smartphone, Layers, Check, ChevronDown
+  BarChart2, FileText, CheckCircle2, 
+  Copy, Printer, Target, Sparkles, 
+  Eye, ThumbsUp, Share2, 
+  RefreshCw, Layers
 } from 'lucide-react';
 import { useActiveClient } from '../contexts/ActiveClientContext';
 import { useTasks } from '../hooks/useTasks';
@@ -14,7 +13,6 @@ import { areIdsMatching } from '../hooks/useClients';
 import { CLIENT_DATASETS, syncLiveMetaAccount, resolveMetaAccountForClient } from '../lib/metaApi';
 import { generateContent } from '../lib/gemini';
 import toast from 'react-hot-toast';
-import { cn } from '../utils/cn';
 
 export default function ReportsView() {
   const { selectedClient, clients, setSelectedClientId } = useActiveClient();
@@ -54,7 +52,6 @@ export default function ReportsView() {
   });
 
   const completedTasks = clientTasks.filter(t => t.status === 'concluido' || t.status === 'finalizado');
-  const inProgressTasks = clientTasks.filter(t => t.status !== 'concluido' && t.status !== 'finalizado');
 
   // Posts deste cliente
   const clientPosts = posts.filter(p => {
@@ -65,7 +62,6 @@ export default function ReportsView() {
   });
 
   const publishedPosts = clientPosts.filter(p => p.status === 'publicado');
-  const plannedPosts = clientPosts.filter(p => p.status !== 'publicado');
 
   // Campanhas sob gestão (se houver)
   const clientCampaigns = campaigns.filter(c => {

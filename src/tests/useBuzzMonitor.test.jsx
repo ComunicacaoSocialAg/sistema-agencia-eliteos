@@ -18,7 +18,7 @@ describe('useBuzzMonitor & Meta API Integration Suite', () => {
 
   it('should calculate engagement rates correctly', () => {
     const rate = calculateEngagementRate(35, 1142);
-    expect(rate).toBe('3.07%');
+    expect(rate).toBe('3.06%');
     expect(calculateEngagementRate(0, 0)).toBe('0.00%');
   });
 

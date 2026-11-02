@@ -3,8 +3,9 @@ import toast from 'react-hot-toast';
 import { 
   Building2, Phone, Mail, Percent, Plus, X, User, Trash2, ChevronLeft, ChevronRight, 
   Sparkles, Copy, Edit3, MessageCircle, DollarSign, CheckCircle2, ArrowRight, FileText,
-  AlertTriangle, RotateCcw
+  AlertTriangle, RotateCcw, MessageSquare
 } from 'lucide-react';
+import RegistrationLinkModal from '../components/RegistrationLinkModal';
 import { useDeals } from '../hooks/useDeals';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useClients } from '../hooks/useClients';
@@ -612,6 +613,7 @@ export default function CRMView() {
   const { setContext } = useAIAssistant();
   
   const [showNewDealModal, setShowNewDealModal] = useState(false);
+  const [showRegistrationLinkModal, setShowRegistrationLinkModal] = useState(false);
   const [selectedAiDeal, setSelectedAiDeal] = useState(null);
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [dealToDelete, setDealToDelete] = useState(null);
@@ -734,6 +736,15 @@ export default function CRMView() {
           <p className="text-sm text-cs-text-secondary">Pipeline comercial e acompanhamento de propostas ativas.</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowRegistrationLinkModal(true)}
+            className="bg-[#25D366] hover:bg-[#20ba5a] text-black px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all shadow-md shadow-[#25D366]/20 flex items-center gap-1.5 cursor-pointer"
+            title="Enviar link seguro de cadastro para início de contrato via WhatsApp"
+          >
+            <MessageSquare size={14} />
+            <span>Link WhatsApp (Cadastro)</span>
+          </button>
           <button
             type="button"
             onClick={restoreMissingDefaults}
@@ -1050,6 +1061,14 @@ export default function CRMView() {
         <NewDealModal
           onClose={() => setShowNewDealModal(false)}
           onSave={(formData) => createDeal(formData)}
+        />
+      )}
+
+      {/* Modal de Link de Cadastro para Início de Contrato */}
+      {showRegistrationLinkModal && (
+        <RegistrationLinkModal
+          isOpen={showRegistrationLinkModal}
+          onClose={() => setShowRegistrationLinkModal(false)}
         />
       )}
     </div>

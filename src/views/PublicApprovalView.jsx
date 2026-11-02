@@ -2,10 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { CheckCircle2, XCircle, AlertCircle, Clock, ExternalLink, Download, MessageSquare, Zap, ArrowLeft } from 'lucide-react';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
-import { cn } from '../utils/cn';
 
 export default function PublicApprovalView() {
   const { taskId } = useParams();

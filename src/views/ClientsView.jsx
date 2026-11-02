@@ -18,18 +18,30 @@ import {
   CheckCircle2,
   Trash2,
   Calendar,
-  FolderOpen
+  FolderOpen,
+  MessageSquare,
+  FileCheck,
+  Building2,
+  Copy,
+  Check,
+  Clock,
+  Send,
+  Eye
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useClients, areIdsMatching } from '../hooks/useClients';
 import { useIntelligence } from '../hooks/useIntelligence';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useProjects } from '../hooks/useProjects';
 import { useTasks } from '../hooks/useTasks';
 import { useDeals } from '../hooks/useDeals';
+import { useClientRegistrations } from '../hooks/useClientRegistrations';
 import { cn } from '../utils/cn';
 import ClientWorkspace from '../components/ClientWorkspace';
 import NewProjectModal from '../components/NewProjectModal';
 import ReviewCenterHub from '../components/ReviewCenterHub';
+import RegistrationLinkModal from '../components/RegistrationLinkModal';
+import ClientRegistrationDetailsModal from '../components/ClientRegistrationDetailsModal';
 import { useAllDeliverables } from '../hooks/useDeliverables';
 import { createClientFolderStructure, createProjectFolder, createProposalFolder } from '../lib/googleDrive';
 
@@ -388,6 +400,7 @@ export default function ClientsView() {
   const [search, setSearch] = useState('');
   
   const [showNewClientModal, setShowNewClientModal] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState(null);
   const selectedClient = selectedClientId 
     ? (clients.find(c => areIdsMatching(c.id, selectedClientId, c.name, '')) || clients.find(c => c.id === selectedClientId) || null)
@@ -398,6 +411,20 @@ export default function ClientsView() {
   const [clientInitialTab, setClientInitialTab] = useState('overview');
 
   const pendingDeliverables = (deliverables || []).filter(d => d.status === 'pendente');
+
+  const { 
+    registrations, 
+    loading: registrationsLoading, 
+    updateStatus: updateRegistrationStatus, 
+    deleteRegistration 
+  } = useClientRegistrations();
+
+  const [showRegistrationLinkModal, setShowRegistrationLinkModal] = useState(false);
+  const [selectedRegistration, setSelectedRegistration] = useState(null);
+  const [showRegistrationDetailsModal, setShowRegistrationDetailsModal] = useState(false);
+
+  const safeRegistrations = Array.isArray(registrations) ? registrations : [];
+  const pendingRegistrationsCount = safeRegistrations.filter(r => r.status === 'pendente').length;
 
   useEffect(() => {
     setContext({
@@ -424,6 +451,41 @@ export default function ClientsView() {
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     (p.client_name && p.client_name.toLowerCase().includes(search.toLowerCase()))
   );
+
+  // Filter registrations
+  const filteredRegistrations = safeRegistrations.filter(r => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (
+      (r.company_name && r.company_name.toLowerCase().includes(s)) ||
+      (r.trade_name && r.trade_name.toLowerCase().includes(s)) ||
+      (r.document_number && r.document_number.includes(s)) ||
+      (r.representative_name && r.representative_name.toLowerCase().includes(s)) ||
+      (r.contact_email && r.contact_email.toLowerCase().includes(s))
+    );
+  });
+
+  const handleConvertRegistrationToClient = async (reg) => {
+    const clientPayload = {
+      name: reg.trade_name || reg.company_name,
+      document_id: reg.document_number,
+      contact_name: reg.representative_name,
+      contact_email: reg.contact_email,
+      contact_phone: reg.contact_phone,
+      monthly_fee: 0,
+      monthly_hours_contracted: 10,
+      billing_day: reg.billing_day || '10',
+      status: 'active',
+      lifecycle_stage: 'onboarding',
+      tone_of_voice: `Empresa: ${reg.company_name}. Ramo e identidade em definição inicial.`,
+      target_audience: 'Público e personas em definição inicial.',
+      value_proposition: reg.observations || 'Início de contrato e onboarding de comunicação.',
+      reportei_config: {
+        instagram_handle: reg.instagram_handle || ''
+      }
+    };
+    await handleCreateClient(clientPayload);
+  };
 
   const handleInjectTestData = async () => {
     try {
@@ -564,41 +626,66 @@ export default function ClientsView() {
           </div>
           <div className="flex items-center gap-3">
             <button 
+              onClick={() => setShowRegistrationLinkModal(true)}
+              className="bg-[#25D366] hover:bg-[#20ba5a] text-black px-4 py-3 rounded-2xl text-xs sm:text-sm font-extrabold transition-all shadow-lg shadow-[#25D366]/20 flex items-center gap-2 cursor-pointer"
+            >
+              <MessageSquare size={16} /> LINK WHATSAPP (CADASTRO)
+            </button>
+            <button 
               onClick={handleInjectTestData}
-              className="bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 text-yellow-400 px-5 py-3 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
+              className="bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 text-yellow-400 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
             >
               Injetar Teste
             </button>
             <button 
               onClick={() => setShowNewClientModal(true)}
-              className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 text-cs-text-secondary hover:text-white px-5 py-3 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
+              className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 text-cs-text-secondary hover:text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
             >
-              <Plus size={18} /> NOVO CLIENTE
+              <Plus size={16} /> NOVO CLIENTE
             </button>
             <button 
               onClick={() => setShowNewProjectModal(true)}
-              className="bg-cs-primary hover:bg-cs-primary-hover text-white px-5 py-3 rounded-2xl text-sm font-bold transition-all shadow-xl shadow-cs-primary/20 flex items-center gap-2 cursor-pointer"
+              className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-xl shadow-cs-primary/20 flex items-center gap-2 cursor-pointer"
             >
-              <Plus size={18} /> NOVO PROJETO
+              <Plus size={16} /> NOVO PROJETO
             </button>
           </div>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-cs-border mb-6">
+        <div className="flex border-b border-cs-border mb-6 overflow-x-auto custom-scrollbar">
           <button
             onClick={() => { setViewTab('clients'); setSearch(''); }}
             className={cn(
-              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer",
+              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer shrink-0",
               viewTab === 'clients' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
             )}
           >
             <Users size={14} /> Clientes ({clients.length})
           </button>
           <button
+            onClick={() => { setViewTab('registrations'); setSearch(''); }}
+            className={cn(
+              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer shrink-0 relative",
+              viewTab === 'registrations' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
+            )}
+          >
+            <Building2 size={14} className={pendingRegistrationsCount > 0 ? "text-emerald-400" : "text-cs-text-secondary"} /> 
+            Cadastros Recebidos
+            {pendingRegistrationsCount > 0 ? (
+              <span className="px-2 py-0.5 bg-emerald-500 text-black text-[10px] font-black rounded-full shadow-sm animate-pulse">
+                {pendingRegistrationsCount} novos
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 bg-cs-surface border border-cs-border text-cs-text-secondary text-[10px] font-bold rounded-full">
+                {safeRegistrations.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => { setViewTab('projects'); setSearch(''); }}
             className={cn(
-              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer",
+              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer shrink-0",
               viewTab === 'projects' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
             )}
           >
@@ -607,7 +694,7 @@ export default function ClientsView() {
           <button
             onClick={() => { setViewTab('review'); setSearch(''); }}
             className={cn(
-              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer relative",
+              "px-6 py-3 font-bold text-xs uppercase tracking-widest border-b-2 transition-all flex items-center gap-2 cursor-pointer shrink-0 relative",
               viewTab === 'review' ? "border-cs-primary text-white" : "border-transparent text-cs-text-secondary hover:text-white"
             )}
           >
@@ -698,7 +785,7 @@ export default function ClientsView() {
           </div>
         )}
 
-        {/* Search (only for clients and projects tabs) */}
+        {/* Search (only for clients, registrations and projects tabs) */}
         {viewTab !== 'review' && (
           <div className="relative mb-8">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-cs-text-secondary" />
@@ -706,7 +793,13 @@ export default function ClientsView() {
               type="text" 
               value={search} 
               onChange={e => setSearch(e.target.value)}
-              placeholder={viewTab === 'clients' ? "Filtrar por nome do cliente ou contato..." : "Filtrar por nome do projeto ou cliente..."}
+              placeholder={
+                viewTab === 'clients' 
+                  ? "Filtrar por nome do cliente ou contato..." 
+                  : viewTab === 'registrations'
+                  ? "Filtrar por empresa, CNPJ, responsável ou e-mail..."
+                  : "Filtrar por nome do projeto ou cliente..."
+              }
               className="w-full bg-cs-surface border border-cs-border rounded-2xl pl-12 pr-4 py-4 text-sm text-white focus:outline-none focus:border-cs-primary transition-all placeholder:text-cs-text-secondary/50 shadow-inner" 
             />
           </div>
@@ -722,6 +815,161 @@ export default function ClientsView() {
               setClientInitialTab(tab || 'approvals');
             }}
           />
+        )}
+
+        {/* REGISTRATIONS TAB (CADASTROS RECEBIDOS) */}
+        {viewTab === 'registrations' && (
+          <div className="space-y-6">
+            {/* Top Bar / Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-cs-surface border border-cs-border rounded-2xl p-5 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-cs-text-secondary uppercase tracking-wider block mb-1">
+                    Fichas Recebidas
+                  </span>
+                  <span className="text-2xl font-black text-white">{safeRegistrations.length}</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-cs-primary/10 border border-cs-primary/30 text-cs-primary flex items-center justify-center">
+                  <Building2 size={20} />
+                </div>
+              </div>
+
+              <div className="bg-cs-surface border border-cs-border rounded-2xl p-5 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-cs-text-secondary uppercase tracking-wider block mb-1">
+                    Aguardando Contrato
+                  </span>
+                  <span className="text-2xl font-black text-yellow-400">{pendingRegistrationsCount}</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 flex items-center justify-center">
+                  <Clock size={20} />
+                </div>
+              </div>
+
+              <div className="bg-cs-surface border border-cs-border rounded-2xl p-5 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-cs-text-secondary uppercase tracking-wider block mb-1">
+                    Clientes Convertidos
+                  </span>
+                  <span className="text-2xl font-black text-emerald-400">
+                    {safeRegistrations.filter(r => r.status === 'convertido').length}
+                  </span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                  <CheckCircle2 size={20} />
+                </div>
+              </div>
+            </div>
+
+            {/* List / Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredRegistrations.map((reg) => (
+                <div 
+                  key={reg.id} 
+                  className="bg-cs-surface border border-cs-border hover:border-cs-primary/40 rounded-3xl p-6 transition-all duration-200 flex flex-col justify-between shadow-lg group relative"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 ${
+                          reg.status === 'convertido'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : reg.status === 'aprovado'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                            : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30'
+                        }`}>
+                          {reg.status === 'convertido' ? 'Convertido em Cliente' : reg.status === 'aprovado' ? 'Aprovado' : 'Aguardando Revisão'}
+                        </span>
+                        <h4 className="text-base font-bold text-white group-hover:text-cs-primary transition-colors leading-snug">
+                          {reg.company_name}
+                        </h4>
+                        {reg.trade_name && reg.trade_name !== reg.company_name && (
+                          <p className="text-xs text-cs-text-secondary mt-0.5">
+                            Fantasia: {reg.trade_name}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-cs-text-secondary font-mono whitespace-nowrap bg-cs-bg px-2 py-1 rounded-lg border border-cs-border">
+                        {reg.person_type || 'PJ'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 py-3 border-y border-cs-border/60 text-xs text-cs-text-secondary">
+                      <div className="flex justify-between items-center">
+                        <span>CNPJ/CPF:</span>
+                        <span className="font-mono text-white font-medium">{reg.document_number}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>Responsável:</span>
+                        <span className="text-white font-medium truncate max-w-[170px]">{reg.representative_name}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>WhatsApp:</span>
+                        <span className="text-white">{reg.contact_phone}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>Vencimento:</span>
+                        <span className="text-emerald-400 font-semibold">Dia {reg.billing_day || '10'}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>Cidade:</span>
+                        <span className="text-white">{reg.city || 'Poços de Caldas'} - {reg.state || 'MG'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 pt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedRegistration(reg);
+                        setShowRegistrationDetailsModal(true);
+                      }}
+                      className="flex-1 bg-cs-bg hover:bg-white/5 border border-cs-border hover:border-cs-primary/50 text-white py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Eye size={14} />
+                      <span>Ver Ficha</span>
+                    </button>
+
+                    {reg.status !== 'convertido' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await handleConvertRegistrationToClient(reg);
+                            await updateRegistrationStatus(reg.id, 'convertido');
+                            toast.success(`Cliente "${reg.trade_name || reg.company_name}" adicionado ao sistema!`);
+                          } catch {
+                            toast.error('Erro ao adicionar cliente');
+                          }
+                        }}
+                        className="bg-cs-primary hover:bg-cs-primary-hover text-black py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-cs-primary/10"
+                        title="Criar cliente oficial no sistema"
+                      >
+                        <FileCheck size={14} />
+                        <span>Criar Cliente</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {filteredRegistrations.length === 0 && (
+                <div className="col-span-full text-center py-20 bg-cs-surface border border-cs-border rounded-3xl border-dashed">
+                  <Building2 size={44} className="mx-auto mb-3 opacity-20 text-cs-primary" />
+                  <h4 className="text-sm font-bold text-white mb-1">Nenhuma ficha cadastral encontrada</h4>
+                  <p className="text-xs text-cs-text-secondary max-w-sm mx-auto mb-5">
+                    Envie o link de cadastro via WhatsApp para seu novo cliente preencher os dados de início de contrato.
+                  </p>
+                  <button
+                    onClick={() => setShowRegistrationLinkModal(true)}
+                    className="bg-[#25D366] hover:bg-[#20ba5a] text-black font-extrabold px-5 py-2.5 rounded-xl text-xs inline-flex items-center gap-2 shadow-lg shadow-[#25D366]/20 cursor-pointer"
+                  >
+                    <MessageSquare size={14} />
+                    <span>Copiar Link para WhatsApp</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* CLIENTS TAB */}
@@ -958,6 +1206,27 @@ export default function ClientsView() {
           onClose={() => setShowNewProjectModal(false)} 
           onSave={handleCreateProject} 
           clients={clients} 
+        />
+      )}
+
+      {showRegistrationLinkModal && (
+        <RegistrationLinkModal
+          isOpen={showRegistrationLinkModal}
+          onClose={() => setShowRegistrationLinkModal(false)}
+        />
+      )}
+
+      {showRegistrationDetailsModal && selectedRegistration && (
+        <ClientRegistrationDetailsModal
+          isOpen={showRegistrationDetailsModal}
+          registration={selectedRegistration}
+          onClose={() => {
+            setShowRegistrationDetailsModal(false);
+            setSelectedRegistration(null);
+          }}
+          onUpdateStatus={updateRegistrationStatus}
+          onDelete={deleteRegistration}
+          onCreateClient={handleConvertRegistrationToClient}
         />
       )}
     </div>
