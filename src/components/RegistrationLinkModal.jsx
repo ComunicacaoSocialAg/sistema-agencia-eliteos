@@ -10,7 +10,7 @@ export default function RegistrationLinkModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const productionBaseUrl = 'https://app.comunicacaosocialag.com.br';
+  const productionBaseUrl = 'https://sistema-agencia-eliteos.vercel.app';
   const url = isLocal ? `${productionBaseUrl}/cadastro` : `${window.location.origin}/cadastro`;
   const defaultMessage = `Olá! Para darmos início ao nosso contrato e prepararmos tudo na Comunicação Social Ag, por favor preencha seus dados cadastrais neste link seguro:\n\n${url}\n\nLeva menos de 2 minutos!`;
 
