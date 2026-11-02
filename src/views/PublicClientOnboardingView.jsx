@@ -5,7 +5,6 @@ import {
   MapPin, 
   CreditCard, 
   Globe, 
-  Instagram, 
   CheckCircle2, 
   Send, 
   ShieldCheck, 
@@ -19,6 +18,26 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useClientRegistrations } from '../hooks/useClientRegistrations';
+
+function InstagramIcon({ size = 18, className = "" }) {
+  return (
+    <svg 
+      width={size} 
+      height={size} 
+      viewBox="0 0 24 24" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round" 
+      className={className}
+    >
+      <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+    </svg>
+  );
+}
 
 export default function PublicClientOnboardingView() {
   const { submitRegistration } = useClientRegistrations();
@@ -621,7 +640,7 @@ export default function PublicClientOnboardingView() {
           {/* 5. Presença Digital & Redes */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-cs-border text-white font-bold text-sm">
-              <Instagram size={18} className="text-cs-primary" />
+              <InstagramIcon size={18} className="text-cs-primary" />
               <span>5. Presença Digital Inicial</span>
             </div>
 
