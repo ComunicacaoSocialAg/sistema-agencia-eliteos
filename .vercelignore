@@ -1,0 +1,15 @@
+node_modules
+dist
+backups
+scratch
+modules
+*.mp4
+0*.md
+CONSULTA_CHATGPT_SISTEMA_AGENCIA.md
+client_secret*.json
+.env
+.env.*
+!.env.example
+.git
+.agents
+.claude
