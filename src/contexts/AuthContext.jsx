@@ -115,7 +115,11 @@ export function AuthProvider({ children }) {
     return () => { active = false; };
   }, [accountId]);
 
-  const profile = isDemoMode ? demoUser : (record?.id === accountId ? record?.profile : null);
+  const profile = isDemoMode
+    ? demoUser
+    : (record?.id === accountId && record?.profile
+      ? { ...record.profile, roleTitle: record.profile.roleTitle || ROLE_TITLES[record.profile.role] || 'Colaborador' }
+      : null);
   const user = isDemoMode ? demoUser : (profile ? session?.user : null);
   const role = profile?.role || null;
   const loading = !isDemoMode && (session === undefined || Boolean(accountId && record?.id !== accountId));
