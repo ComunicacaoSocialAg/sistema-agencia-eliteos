@@ -30,7 +30,7 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) {
       toast.error('O nome do cliente é obrigatório.');
@@ -43,13 +43,12 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
       reportei_config = { project_id: form.reportei_url.trim() };
     }
 
-    onSave({
+    const saved = await onSave({
       ...form,
       monthly_fee: Number(form.monthly_fee) || 0,
       reportei_config
     });
-    toast.success('Configurações do cliente salvas com sucesso!');
-    onClose();
+    if (saved) onClose();
   };
 
   const tabs = [

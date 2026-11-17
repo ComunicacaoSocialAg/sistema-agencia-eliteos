@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import { 
   X, 
   Clock, 
@@ -21,7 +22,7 @@ import {
   Download
 } from 'lucide-react';
 import { format, parseISO, isPast } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { cn } from '../utils/cn';
 import ApprovalFlow from './ApprovalFlow';
 import { chatWithAgent, isAIConfigured } from '../lib/gemini';
@@ -45,7 +46,7 @@ function safeParseISO(dateStr) {
   }
 }
 
-export default function TaskModal({ task, onClose, onUpdate, onAddComment, onToggleChecklist, columns = [], user }) {
+export default function TaskModal({ task, onClose, onUpdate, onAddComment, onToggleChecklist, onScheduleFollowUp, columns = [], user }) {
   const [activeTab, setActiveTab] = useState('geral');
   const [newComment, setNewComment] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -53,6 +54,10 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
   const [generatedCopy, setGeneratedCopy] = useState('');
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemText, setNewItemText] = useState('');
+  const [deliveryUrl, setDeliveryUrl] = useState('');
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [savingDelivery, setSavingDelivery] = useState(false);
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
 
   if (!task) return null;
 
@@ -75,6 +80,47 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
     setIsAddingItem(false);
     toast.success('Item adicionado ao checklist!');
   };
+  const links = Array.isArray(task.external_links) ? task.external_links : [];
+  const delivery = links.find(link => link?.kind === 'delivery' && /^https?:\/\//i.test(link.url || ''));
+  const saveDelivery = async () => {
+    let url;
+    try {
+      url = new URL(deliveryUrl.trim());
+      if (!['https:', 'http:'].includes(url.protocol)) throw new Error();
+    } catch {
+      toast.error('Informe um link válido da entrega.');
+      return;
+    }
+    setSavingDelivery(true);
+    try {
+      const saved = await onUpdate({
+        ...task,
+        external_links: [...links.filter(link => link?.kind !== 'delivery'), {
+          kind: 'delivery', name: 'Entrega', url: url.href,
+        }],
+      });
+      if (saved) {
+        setDeliveryUrl('');
+        toast.success('Link da entrega salvo.');
+      }
+    } finally {
+      setSavingDelivery(false);
+    }
+  };
+
+  const scheduleFollowUp = async () => {
+    if (!followUpDate) return;
+    setSavingFollowUp(true);
+    try {
+      const saved = await onScheduleFollowUp(task, followUpDate);
+      if (saved) setFollowUpDate('');
+    } catch {
+      toast.error('Não foi possível marcar o acompanhamento. Tente novamente.');
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
   const taskIdDisplay = (task.id || 'TASK').toString().slice(0, 4);
   const deadlineDate = safeParseISO(task.deadline);
   const tagColorClass = TAG_COLORS[task.tag] || 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
@@ -104,10 +150,10 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
     }
   };
 
-  const handleAddComment = () => {
+  const handleAddComment = async () => {
     if (!newComment.trim()) return;
-    onAddComment(task.id, newComment.trim(), user?.name || 'Bruno');
-    setNewComment('');
+    const saved = await onAddComment(task.id, newComment.trim(), user?.name || 'Bruno');
+    if (saved) setNewComment('');
   };
 
   const handleAISummary = () => {
@@ -147,7 +193,7 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
              >
                <History size={14} /> LOG
              </button>
-             <button onClick={onClose} className="text-cs-text-secondary hover:text-white p-2.5 hover:bg-white/5 rounded-xl transition-all">
+             <button aria-label="Fechar tarefa" onClick={onClose} className="text-cs-text-secondary hover:text-white p-2.5 hover:bg-white/5 rounded-xl transition-all">
                <X size={24} />
              </button>
           </div>
@@ -470,6 +516,23 @@ export default function TaskModal({ task, onClose, onUpdate, onAddComment, onTog
                   ))}
                 </div>
               </section>
+
+              {onScheduleFollowUp && task.status === 'concluido' && (
+                <section className="space-y-3 border-t border-cs-border pt-4">
+                  <h3 className="text-sm font-semibold text-white">Entrega e acompanhamento</h3>
+                  {delivery && <a href={delivery.url} target="_blank" rel="noreferrer" className="text-xs text-cs-primary underline">Abrir entrega registrada</a>}
+                  <label className="block text-xs text-cs-text-secondary" htmlFor="task-delivery-url">Link da entrega</label>
+                  <input id="task-delivery-url" type="url" value={deliveryUrl} onChange={event => setDeliveryUrl(event.target.value)}
+                    className="w-full rounded-lg border border-cs-border bg-cs-bg p-2 text-sm text-white" />
+                  <button type="button" onClick={saveDelivery} disabled={savingDelivery || !deliveryUrl.trim()}
+                    className="rounded-lg bg-cs-surface px-3 py-2 text-xs text-white disabled:opacity-50">Salvar link da entrega</button>
+                  <label className="block text-xs text-cs-text-secondary" htmlFor="task-follow-up-date">Data do acompanhamento</label>
+                  <input id="task-follow-up-date" type="date" value={followUpDate} onChange={event => setFollowUpDate(event.target.value)}
+                    className="w-full rounded-lg border border-cs-border bg-cs-bg p-2 text-sm text-white" />
+                  <button type="button" onClick={scheduleFollowUp} disabled={savingFollowUp || !followUpDate || !task.client_id}
+                    className="rounded-lg bg-cs-primary px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">Criar tarefa de acompanhamento</button>
+                </section>
+              )}
 
               {/* Esforço e Tempo */}
               <section className="bg-cs-surface border border-cs-border rounded-3xl p-6 shadow-inner">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { 
   Building2, Phone, Mail, Percent, Plus, X, User, Trash2, ChevronLeft, ChevronRight, 
@@ -10,9 +10,8 @@ import { useDeals } from '../hooks/useDeals';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useClients } from '../hooks/useClients';
 import { useTasks } from '../hooks/useTasks';
-import { useInvoices } from '../hooks/useInvoices';
-import { generateOnboardingWorkflow } from '../components/OnboardingModule';
 import { generateContent } from '../lib/gemini';
+import { operationId } from '../lib/operationId';
 
 const COLUMNS = [
   { id: 'prospeccao', title: 'Prospecção', color: 'bg-zinc-500' },
@@ -63,28 +62,55 @@ function openEmail(email, contactName, company) {
   window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
 }
 
+function FollowUpFields({ form, setForm }) {
+  const inputClass = "w-full bg-cs-bg border border-cs-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cs-primary";
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label className="text-xs text-cs-text-secondary space-y-1">
+        Próxima ação
+        <input className={inputClass} value={form.next_action} maxLength={160}
+          onChange={event => setForm(current => ({ ...current, next_action: event.target.value }))} />
+      </label>
+      <label className="text-xs text-cs-text-secondary space-y-1">
+        Data do retorno
+        <input className={inputClass} type="date" value={form.follow_up_on}
+          onChange={event => setForm(current => ({ ...current, follow_up_on: event.target.value }))} />
+      </label>
+    </div>
+  );
+}
+
 // Modal de Novo Negócio
 function NewDealModal({ onClose, onSave }) {
+  const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState({
     company: '',
     contact: '',
     contact_phone: '',
     contact_email: '',
-    value: 1800,
+    value: '',
     probability: 20,
     status: 'prospeccao',
     assigned_to: 'Bruno',
-    notes: ''
+    notes: '',
+    next_action: '',
+    follow_up_on: '',
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.company.trim()) {
       toast.error('Informe o nome da empresa.');
       return;
     }
-    onSave({ ...form, value: Number(form.value) || 0 });
-    onClose();
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const saved = await onSave({ ...form, company: form.company.trim(), value: Number(form.value) || 0 });
+      if (saved) onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -175,7 +201,7 @@ function NewDealModal({ onClose, onSave }) {
                 onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                 className="w-full bg-cs-bg border border-cs-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cs-primary"
               >
-                {COLUMNS.map(col => <option key={col.id} value={col.id}>{col.title}</option>)}
+                {COLUMNS.filter(col => col.id !== 'ganho').map(col => <option key={col.id} value={col.id}>{col.title}</option>)}
               </select>
             </div>
             <div>
@@ -189,6 +215,8 @@ function NewDealModal({ onClose, onSave }) {
               </select>
             </div>
           </div>
+
+          <FollowUpFields form={form} setForm={setForm} />
 
           <div>
             <label className="text-xs text-cs-text-secondary mb-1 block">Diagnóstico e Anotações</label>
@@ -211,6 +239,7 @@ function NewDealModal({ onClose, onSave }) {
             </button>
             <button 
               type="submit"
+              disabled={isSaving}
               className="flex-1 bg-cs-primary hover:bg-cs-primary-hover text-white py-2.5 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-cs-primary/20 cursor-pointer"
             >
               Criar Negócio
@@ -288,7 +317,9 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
     probability: deal.probability || 0,
     status: deal.status || 'prospeccao',
     assigned_to: deal.assigned_to || 'Bruno',
-    notes: deal.notes || ''
+    notes: deal.notes || '',
+    next_action: deal.next_action || '',
+    follow_up_on: deal.follow_up_on || '',
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -310,18 +341,19 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
     }
     setIsSaving(true);
     try {
-      await onUpdate(deal.id, {
+      const saved = await onUpdate(deal.id, {
         company: form.company,
         contact: form.contact,
         contact_phone: form.contact_phone,
         contact_email: form.contact_email,
         value: Number(form.value) || 0,
         probability: Number(form.probability) || 0,
-        status: form.status,
         assigned_to: form.assigned_to,
-        notes: form.notes
+        notes: form.notes,
+        next_action: form.next_action.trim(),
+        follow_up_on: form.follow_up_on,
       });
-      onClose();
+      if (saved) onClose();
     } catch {
       toast.error('Erro ao salvar as alterações.');
     } finally {
@@ -330,8 +362,10 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
   };
 
   const handleStageChange = async (newStage) => {
-    setForm(f => ({ ...f, status: newStage }));
-    await onMoveStage(deal.id, newStage);
+    if (await onMoveStage(deal.id, newStage)) setForm(current => ({
+      ...current, status: newStage,
+      ...(newStage === 'ganho' ? { next_action: '', follow_up_on: '' } : {}),
+    }));
   };
 
   return (
@@ -531,6 +565,8 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
             </div>
           </div>
 
+          <FollowUpFields form={form} setForm={setForm} />
+
           {/* Diagnóstico Comercial & Notas */}
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -606,10 +642,10 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
 }
 
 export default function CRMView() {
-  const { deals, moveDeal, createDeal, updateDeal, deleteDeal, restoreDeal, restoreMissingDefaults } = useDeals();
-  const { clients, createClient } = useClients();
-  const { createTask } = useTasks();
-  const { createInvoice } = useInvoices();
+  const { deals, loading, error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal, deleteDeal, restoreDeal, restoreMissingDefaults, refetch } = useDeals();
+  const { clients, createClient, refetch: refreshClients } = useClients();
+  const { createTask, remoteMode, refresh: refreshTasks } = useTasks();
+  const closing = useRef(new Set());
   const { setContext } = useAIAssistant();
   
   const [showNewDealModal, setShowNewDealModal] = useState(false);
@@ -618,10 +654,10 @@ export default function CRMView() {
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [dealToDelete, setDealToDelete] = useState(null);
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!dealToDelete) return;
     const backup = { ...dealToDelete };
-    deleteDeal(dealToDelete.id);
+    if (!await deleteDeal(dealToDelete.id)) return;
     setDealToDelete(null);
     if (selectedDeal?.id === dealToDelete.id) {
       setSelectedDeal(null);
@@ -644,65 +680,69 @@ export default function CRMView() {
   };
 
   const handleMoveDeal = async (dealId, newStatus) => {
-    const deal = deals.find(d => d.id === dealId);
-    if (!deal) return;
-    
-    if (newStatus === 'ganho' && deal.status !== 'ganho') {
-      try {
-        const newClient = await createClient({
+    const deal = deals.find(item => item.id === dealId);
+    if (!deal || closing.current.has(dealId)) return false;
+    if (deal.localOnly) {
+      toast.error('Salve o registro deste navegador no CRM antes de mudar o estágio.');
+      return false;
+    }
+    if (deal.status === newStatus && (newStatus !== 'ganho' || deal.onboarding_task_id || !serverMode)) return true;
+
+    closing.current.add(dealId);
+    try {
+      if (newStatus === 'ganho' && serverMode) {
+        const existing = clients.find(client => /^[a-f0-9-]{36}$/i.test(client.id) &&
+          client.name?.trim().toLocaleLowerCase('pt-BR') === deal.company.trim().toLocaleLowerCase('pt-BR'));
+        const closed = await closeDeal(dealId, existing?.id);
+        if (!closed) return false;
+        setSelectedDeal(previous => previous?.id === dealId ? closed : previous);
+        window.dispatchEvent(new Event('csag:remote-clients-changed'));
+        await Promise.allSettled([refreshTasks(), refreshClients()]);
+        toast.success('Negócio fechado. A próxima ação está em Produção.');
+        return true;
+      }
+
+      if (newStatus === 'ganho') {
+        const clientId = await operationId(`onboarding-cliente-${dealId}`, remoteMode);
+        const matchingClient = clients.find(item => item.id === clientId
+          || (item.name?.trim().toLocaleLowerCase('pt-BR') === deal.company.trim().toLocaleLowerCase('pt-BR')
+            && (!remoteMode || /^[a-f0-9-]{36}$/i.test(item.id))));
+        const client = matchingClient || await createClient({
+          id: clientId,
           name: deal.company,
           contact_name: deal.contact,
           contact_email: deal.contact_email || '',
           contact_phone: deal.contact_phone || '',
-          monthly_fee: deal.value || 5000,
-          brand_color: '#eab308',
           status: 'active',
+          lifecycle_stage: 'onboarding',
+        }, { handoff: true });
+        if (!client) return false;
+
+        const task = await createTask({
+          id: await operationId(`onboarding-tarefa-${dealId}`, remoteMode),
+          title: 'Alinhar briefing e próximos passos',
+          client_id: client.id,
+          client_name: client.name,
+          tag: 'Campanha',
+          priority: 'high',
+          status: 'briefing',
           notes: deal.notes || '',
-          tone_of_voice: 'Profissional e Estratégico',
-          target_audience: 'Público Qualificado',
-          strategic_goals: deal.notes || 'Geração de Demanda e Fortalecimento de Marca'
         });
-
-        // 1ª Mensalidade (Fee) gerada automaticamente no Financeiro
-        if (createInvoice) {
-          try {
-            await createInvoice({
-              client_id: newClient.id,
-              client_name: newClient.name,
-              amount: deal.value || 5000,
-              due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              status: 'pendente',
-              description: `1ª Mensalidade - Contrato fechado via CRM (${deal.company})`
-            });
-          } catch (invErr) {
-            console.warn('Erro ao gerar primeira fatura:', invErr);
-          }
+        if (!task) {
+          toast.error('Cliente registrado. Repita o fechamento para retomar o onboarding.');
+          return false;
         }
-
-        const onboardingTasks = generateOnboardingWorkflow(newClient.id, new Date().toISOString());
-        for (const t of onboardingTasks) {
-          await createTask({
-            title: `[ONBOARDING] ${t.title}`,
-            client_id: newClient.id,
-            client_name: newClient.name,
-            tag: 'Campanha',
-            priority: t.priority || 'high',
-            estimated_hours: 4,
-            status: 'em-producao',
-            demand_status: 'em_producao',
-            deadline: t.due_date,
-            description: t.description,
-          });
-        }
-        toast.success(`🎉 Negócio Ganho! Cliente "${deal.company}" cadastrado, 1ª fatura emitida e onboarding criado.`);
-      } catch (error) {
-        console.error("Erro no handoff:", error);
       }
-    }
-    
-    await moveDeal(dealId, newStatus);
-    if (selectedDeal && selectedDeal.id === dealId) {
-      setSelectedDeal(prev => prev ? { ...prev, status: newStatus } : null);
+
+      if (!await moveDeal(dealId, newStatus)) return false;
+      setSelectedDeal(previous => previous?.id === dealId ? { ...previous, status: newStatus } : previous);
+      toast.success(newStatus === 'ganho' ? 'Negócio fechado. A próxima ação está em Produção.' : 'Estágio atualizado.');
+      return true;
+    } catch {
+      toast.error('Não foi possível concluir a mudança. Tente novamente.');
+      return false;
+    } finally {
+      closing.current.delete(dealId);
     }
   };
 
@@ -745,7 +785,7 @@ export default function CRMView() {
             <MessageSquare size={14} />
             <span>Link WhatsApp (Cadastro)</span>
           </button>
-          <button
+          {!serverMode && <button
             type="button"
             onClick={restoreMissingDefaults}
             className="bg-cs-surface hover:bg-cs-surface-hover border border-cs-border text-cs-text-secondary hover:text-white px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -753,7 +793,7 @@ export default function CRMView() {
           >
             <RotateCcw size={14} />
             <span>Restaurar Padrões</span>
-          </button>
+          </button>}
           <div className="bg-cs-surface border border-cs-border rounded-lg px-4 py-2 flex flex-col items-end">
              <span className="text-xs text-cs-text-secondary">Pipeline Total</span>
              <span className="text-sm font-bold text-green-500">
@@ -770,6 +810,10 @@ export default function CRMView() {
       </div>
 
       {/* Kanban Board for CRM */}
+      {loading && <p role="status" className="text-sm text-cs-text-secondary mb-3">Carregando negócios…</p>}
+      {error && <div role="alert" className="text-sm text-red-300 mb-3">
+        {error} <button type="button" onClick={refetch} className="underline">Tentar novamente</button>
+      </div>}
       <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-start gap-4 pb-4">
         {COLUMNS.map(column => {
           const colDeals = deals.filter(deal => deal.status === column.id);
@@ -876,6 +920,25 @@ export default function CRMView() {
                           </span>
                         )}
                       </div>
+
+                      {deal.localOnly && (
+                        <button type="button" className="text-xs text-cs-primary underline my-2"
+                          onClick={async event => {
+                            event.stopPropagation();
+                            if (closing.current.has(deal.id)) return;
+                            closing.current.add(deal.id);
+                            try { await importDeal(deal); }
+                            finally { closing.current.delete(deal.id); }
+                          }}>
+                          Salvar registro deste navegador no CRM
+                        </button>
+                      )}
+                      {(deal.next_action || deal.follow_up_on) && !['ganho', 'perdido'].includes(deal.status) && (
+                        <p className="mt-2 text-xs text-cs-text-secondary">
+                          {deal.follow_up_on && <time dateTime={deal.follow_up_on}>{deal.follow_up_on.split('-').reverse().join('/')} </time>}
+                          {deal.next_action || 'Retomar contato'}
+                        </p>
+                      )}
 
                       {/* Diagnóstico / Anotações do Prospect */}
                       {deal.notes && (
@@ -1110,7 +1173,7 @@ Gere 2 versões de abordagem de prospecção para o canal "${copyType.toUpperCas
 - Empresa: ${deal.company}
 - Contato: ${deal.contact || 'Prezado(a)'}
 - Diagnóstico: ${deal.notes || 'Sem observações prévias'}
-- Ticket Estimado: R$ ${deal.value || 1800}/mês
+- Valor mensal estimado: ${deal.value ? formatCurrency(deal.value) : 'Ainda não definido'}
 
 Regras CS Ag: nunca use travessão longo. Seja pragmático, sem clichês de agência. Gancho baseado no diagnóstico real. Convite para conversa de 15 minutos.
 Formate estritamente assim:
@@ -1133,7 +1196,7 @@ Gere 2 opções de resposta curta e humana para WhatsApp:
 Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
       }
 
-      const raw = await generateContent(prompt);
+      const raw = await generateContent(prompt, 'auto', { requireProvider: true });
       let textA = '';
       let textB = '';
 
@@ -1153,16 +1216,11 @@ Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
       setVersionA(textA);
       setVersionB(textB);
     } catch {
-      setVersionA(`Olá ${deal.contact || 'Doutor(a)'}! Tudo bem?\n\nAcompanho a presença da ${deal.company} aqui em Poços de Caldas e notei pontos cruciais que podemos destravar para acelerar sua captação de clientes.\n\nPodemos marcar um café de 15 minutos nesta semana?\n\nUm abraço,\nBruno | CS Ag`);
-      setVersionB(`Prezado(a) ${deal.contact || 'Doutor(a)'}, como vai?\n\nAvaliando o posicionamento digital da ${deal.company}, estruturamos uma estratégia personalizada focada em autoridade e captação qualificada.\n\nVocê teria disponibilidade para uma breve ligação de 10 minutos amanhã?\n\nAtenciosamente,\nBruno | CS Ag`);
+      toast.error('A IA não está disponível para gerar o rascunho agora.');
     } finally {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    generateAIPitches();
-  }, [activeTab, copyType, selectedObjection]);
 
   const handleCopy = (text, isA) => {
     navigator.clipboard.writeText(text);
@@ -1282,15 +1340,24 @@ Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
                   className="flex-1 bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
                 />
                 <button
-                  onClick={generateAIPitches}
+                  onClick={generateAIPitches} disabled={loading}
                   className="px-4 py-2 bg-cs-primary hover:bg-cs-primary-hover text-white rounded-xl text-xs font-bold transition-all"
                 >
-                  Regerar
+                  Gerar respostas
                 </button>
               </div>
             </div>
           )}
         </div>
+
+        {activeTab === 'prospeccao' && (
+          <div className="px-6 pt-3">
+            <button type="button" onClick={generateAIPitches} disabled={loading}
+              className="rounded-lg bg-cs-primary px-4 py-2 text-sm font-medium text-black disabled:opacity-50">
+              Gerar abordagens
+            </button>
+          </div>
+        )}
 
         {/* Content Area with 2 Generated Versions */}
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-6">
@@ -1301,6 +1368,8 @@ Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
                 Gerando 2 versões estratégicas com IA...
               </p>
             </div>
+          ) : !versionA && !versionB ? (
+            <p className="text-sm text-cs-text-secondary">Gere um rascunho para revisar antes de entrar em contato.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Versão 1 */}

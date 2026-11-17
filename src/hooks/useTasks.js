@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { createContext, createElement, useContext, useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { isSupabaseConfigured } from '../lib/supabase';
+import { normalizeTaskStatus, useSupabaseTasks } from './useSupabaseTasks';
 import toast from 'react-hot-toast';
-import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../lib/firebase';
 import { areIdsMatching } from './useClients';
 
 const INITIAL_DEMO_TASKS = [
@@ -109,177 +110,171 @@ const INITIAL_DEMO_TASKS = [
   }
 ];
 
-export function useTasks(clientId, options = {}) {
-  const { showArchived = false } = options;
+const TASK_KEY = 'csag_custom_tasks';
+const TASK_EVENT = 'csag_tasks_updated';
 
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const saved = localStorage.getItem('csag_custom_tasks');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-    return INITIAL_DEMO_TASKS;
-  });
+function readBrowserTasks() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TASK_KEY));
+    if (Array.isArray(saved)) return saved;
+  } catch {
+    // Preserve the existing browser data when it cannot be read.
+  }
+  return INITIAL_DEMO_TASKS;
+}
 
-  const [loading, setLoading] = useState(true);
+function useBrowserTasks(enabled = true) {
+  const [tasks, setTasks] = useState(() => enabled ? readBrowserTasks() : []);
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !db) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    let q = collection(db, 'tasks');
-    if (clientId) {
-      q = query(q, where('client_id', '==', clientId));
-    }
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      if (!showArchived) {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        data = data.filter(t => {
-          if (t.status !== 'concluido' && t.status !== 'finalizado' && t.demand_status !== 'publicado') return true;
-          if (!t.deadline) return true;
-          const d = new Date(t.deadline);
-          return d >= thirtyDaysAgo;
-        });
-      }
-
-      if (data.length > 0) {
-        setTasks(data);
-      }
-      setLoading(false);
-    }, (err) => {
-      console.warn('[Firebase] Erro ao buscar tarefas:', err.message);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [clientId, showArchived]);
-
-  // Persistência local em modo demo e sincronização reativa sem loop
-  useEffect(() => {
-    try {
-      const serialized = JSON.stringify(tasks);
-      if (localStorage.getItem('csag_custom_tasks') !== serialized) {
-        localStorage.setItem('csag_custom_tasks', serialized);
-        window.dispatchEvent(new CustomEvent('csag_tasks_updated', { detail: tasks }));
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [tasks]);
-
-  useEffect(() => {
-    const handleUpdate = () => {
-      try {
-        const saved = localStorage.getItem('csag_custom_tasks');
-        if (!saved) return;
-        setTasks(prev => {
-          if (JSON.stringify(prev) === saved) return prev;
-          const parsed = JSON.parse(saved);
-          return Array.isArray(parsed) ? parsed : prev;
-        });
-      } catch (e) {
-        console.warn(e);
-      }
+    if (!enabled) return;
+    const sync = event => {
+      if (event?.type === 'storage' && event.key !== TASK_KEY && event.key !== null) return;
+      setTasks(readBrowserTasks());
     };
-    window.addEventListener('storage', handleUpdate);
-    window.addEventListener('csag_tasks_updated', handleUpdate);
+    window.addEventListener('storage', sync);
+    window.addEventListener(TASK_EVENT, sync);
+    sync();
     return () => {
-      window.removeEventListener('storage', handleUpdate);
-      window.removeEventListener('csag_tasks_updated', handleUpdate);
+      window.removeEventListener('storage', sync);
+      window.removeEventListener(TASK_EVENT, sync);
     };
-  }, []);
+  }, [enabled]);
 
-  const updateTask = async (updatedTask) => {
-    setTasks(prev => prev.map(t => t.id === updatedTask.id ? { ...t, ...updatedTask } : t));
-
-    if (!isFirebaseConfigured || !db) return;
-
+  function commit(update) {
     try {
-      const { id, is_tracking, client, ...dbTask } = updatedTask;
-      await updateDoc(doc(db, 'tasks', id), dbTask);
-    } catch (e) {
-      console.warn('Erro ao atualizar tarefa no Firebase:', e);
+      const previous = readBrowserTasks();
+      const next = update(previous);
+      if (next !== previous) {
+        localStorage.setItem(TASK_KEY, JSON.stringify(next));
+        window.dispatchEvent(new CustomEvent(TASK_EVENT));
+      }
+      return true;
+    } catch {
+      toast.error('Não foi possível salvar neste navegador. Verifique o armazenamento.');
+      return false;
     }
-  };
+  }
 
-  const createTask = async (taskData) => {
-    const { checklist: initialChecklist, ...baseData } = taskData;
-    const newTask = {
-      ...baseData,
-      id: taskData.id || `task-${Date.now()}`,
-      client: { name: taskData.client_name || 'Novo Cliente' },
-      comments: taskData.comments || [],
-      checklist: initialChecklist || [],
-      status: taskData.status || 'a-fazer',
-      demand_status: taskData.demand_status || 'em_producao',
-      tag: taskData.tag || 'Social Media',
-      priority: taskData.priority || 'medium',
-      assigned_to: taskData.assigned_to || 'Bruno',
-      estimated_hours: taskData.estimated_hours || 2.0,
-      actual_hours: 0,
-      is_tracking: false,
-      tracked_seconds: 0,
+  async function createTask(input) {
+    if (!input.title?.trim()) return null;
+    const task = {
+      demoOnly: true,
+      client: { name: input.client_name || 'Interno' },
+      comments: [], checklist: [], demand_status: 'em_producao', tag: 'Social Media',
+      priority: 'medium', assigned_to: 'Bruno', estimated_hours: 2, actual_hours: 0,
+      is_tracking: false, tracked_seconds: 0,
+      ...input,
+      id: input.id || `task-${crypto.randomUUID()}`,
+      title: input.title.trim(),
+      status: normalizeTaskStatus(input.status || 'backlog'),
       created_at: new Date().toISOString(),
     };
+    const existing = readBrowserTasks().find(item => item.id === task.id);
+    if (existing) return existing;
+    if (!commit(previous => [task, ...previous])) return null;
+    toast.success('Tarefa salva neste navegador.');
+    return task;
+  }
 
-    setTasks(prev => [newTask, ...prev]);
-    toast.success('Tarefa criada com sucesso!');
-
-    if (!isFirebaseConfigured || !db) {
-      return newTask;
-    }
-
-    try {
-      const docRef = doc(collection(db, 'tasks'));
-      newTask.id = docRef.id;
-      const { client, is_tracking, ...dbTask } = newTask;
-      await setDoc(docRef, dbTask);
-      return newTask;
-    } catch (e) {
-      console.warn('Erro ao salvar no Firebase, mantendo local:', e);
-      return newTask;
-    }
-  };
-
-  const deleteTask = async (taskId) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    toast.success('Tarefa excluída!');
-
-    if (!isFirebaseConfigured || !db) return;
-
-    try {
-      await deleteDoc(doc(db, 'tasks', taskId));
-    } catch (e) {
-      console.warn('Erro ao remover no Firebase:', e);
-    }
-  };
-
-  const toggleChecklist = async (taskId, itemId) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      const newChecklist = (t.checklist || []).map(item =>
-        item.id === itemId ? { ...item, is_done: !item.is_done } : item
-      );
-      const updated = { ...t, checklist: newChecklist };
-      if (isFirebaseConfigured && db) {
-        updateDoc(doc(db, 'tasks', taskId), { checklist: newChecklist }).catch(() => {});
-      }
-      return updated;
+  async function updateTask(input) {
+    let saved = null;
+    const success = commit(previous => previous.map(task => {
+      if (task.id !== input.id) return task;
+      saved = { ...task, ...input };
+      if (saved.status === 'concluido' && task.status !== 'concluido') saved.completed_at = new Date().toISOString();
+      if (saved.status !== 'concluido') saved.completed_at = null;
+      return saved;
     }));
-  };
+    return success ? saved : null;
+  }
 
-  const applyTemplate = async (templateType, targetClientId = null) => {
+  async function deleteTask(id) {
+    const success = commit(previous => previous.filter(task => task.id !== id));
+    if (success) toast.success('Tarefa excluída.');
+    return success;
+  }
+
+  async function toggleChecklist(taskId, itemId) {
+    const task = readBrowserTasks().find(item => item.id === taskId);
+    if (!task) return null;
+    return updateTask({
+      id: taskId,
+      checklist: (task.checklist || []).map(item => item.id === itemId ? { ...item, is_done: !item.is_done } : item),
+    });
+  }
+
+  async function addComment(taskId, content, authorName = 'Bruno', isAI = false) {
+    const task = readBrowserTasks().find(item => item.id === taskId);
+    if (!task || !content.trim()) return null;
+    const comment = {
+      id: `comment-${crypto.randomUUID()}`,
+      author_name: authorName, content: content.trim(), is_ai: isAI, created_at: new Date().toISOString(),
+    };
+    return await updateTask({ id: taskId, comments: [...(task.comments || []), comment] }) ? comment : null;
+  }
+
+  return { tasks, loading: false, createTask, updateTask, deleteTask, toggleChecklist, addComment };
+}
+
+const TaskContext = createContext(null);
+const byNewest = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''));
+
+export function TasksProvider({ children }) {
+  const { user, profile, isDemoMode } = useAuth();
+  const serverMode = isSupabaseConfigured && !isDemoMode && !user?.id?.startsWith('demo-');
+  const accountId = serverMode && profile?.role !== 'client' && user?.id === profile?.id ? user?.id : null;
+  const browser = useBrowserTasks(!serverMode || Boolean(accountId && profile.role !== 'client'));
+  const remote = useSupabaseTasks(accountId);
+  const remoteIds = new Set(remote.tasks.map(task => task.id));
+  const demoIds = new Set(INITIAL_DEMO_TASKS.map(task => task.id));
+  const legacy = accountId && profile.role !== 'client'
+    ? browser.tasks.filter(task => !remoteIds.has(task.id) && !demoIds.has(task.id) && !task.demoOnly
+      && !String(task.id).startsWith('demo-')).map(task => ({ ...task, browserOnly: true }))
+    : [];
+  const legacyIds = new Set(legacy.map(task => task.id));
+  const tasks = serverMode ? [...remote.tasks, ...legacy].sort(byNewest) : browser.tasks;
+  const value = serverMode ? {
+    ...remote,
+    tasks,
+    loading: !accountId || remote.loading,
+    remoteMode: true,
+    createTask: remote.createTask,
+    updateTask: task => legacyIds.has(task.id) ? browser.updateTask(task) : remote.updateTask(task),
+    deleteTask: id => legacyIds.has(id) ? browser.deleteTask(id) : remote.deleteTask(id),
+    addComment: (id, ...args) => legacyIds.has(id) ? browser.addComment(id, ...args) : remote.addComment(id, ...args),
+    toggleChecklist: (id, item) => legacyIds.has(id) ? browser.toggleChecklist(id, item) : remote.toggleChecklist(id, item),
+  } : browser;
+  return createElement(TaskContext.Provider, { value }, children);
+}
+
+export function useTasks(clientId, { showArchived = false } = {}) {
+  const shared = useContext(TaskContext);
+  const fallback = useBrowserTasks(!shared);
+  const collection = shared || fallback;
+  const allTasks = useMemo(() => collection.tasks.map(task => task.status === normalizeTaskStatus(task.status)
+    ? task : { ...task, status: normalizeTaskStatus(task.status) }), [collection.tasks]);
+  const tasks = useMemo(() => {
+    const archiveBefore = new Date();
+    archiveBefore.setDate(archiveBefore.getDate() - 30);
+    return allTasks.filter(task => {
+      if (clientId && !areIdsMatching(task.client_id, clientId, task.client_name || task.client?.name, '')) return false;
+      return showArchived || task.status !== 'concluido' || !task.deadline || new Date(task.deadline) >= archiveBefore;
+    });
+  }, [allTasks, clientId, showArchived]);
+  return {
+    ...collection,
+    tasks,
+    allTasks,
+    applyTemplate: (type, targetClientId) => applyTaskTemplate(collection.createTask, type, targetClientId || clientId),
+  };
+}
+
+async function applyTaskTemplate(createTask, templateType, clientId) {
+    if (!clientId) {
+      toast.error('Selecione o cliente para aplicar o modelo.');
+      return [];
+    }
     const templates = {
       'social-media': [
         { title: 'Planejamento Editorial do Mês', priority: 'high', tag: 'Social Media', status: 'em-producao' },
@@ -301,59 +296,15 @@ export function useTasks(clientId, options = {}) {
       const task = await createTask({
         title: item.title,
         priority: item.priority,
-        status: item.status || 'a-fazer',
+        status: item.status || 'backlog',
         demand_status: 'em_producao',
         tag: item.tag || 'Social Media',
-        client_id: targetClientId || clientId || 'ce45a984-093d-4484-9ee4-9177d56310e3',
+        client_id: clientId,
         deadline: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
       });
       if (task) created.push(task);
     }
 
-    toast.success(`Template "${templateType}" aplicado com sucesso!`);
+    if (created.length === selectedTemplate.length) toast.success('Modelo aplicado.');
     return created;
-  };
-
-  const addComment = async (taskId, content, authorName = 'Bruno', isAI = false) => {
-    const newComment = {
-      id: `comment-${Date.now()}`,
-      author_name: authorName,
-      content,
-      is_ai: isAI,
-      created_at: new Date().toISOString(),
-    };
-
-    setTasks(prev => prev.map(t =>
-      t.id === taskId ? { ...t, comments: [...(t.comments || []), newComment] } : t
-    ));
-
-    if (!isFirebaseConfigured || !db) return;
-
-    try {
-      const task = tasks.find(t => t.id === taskId);
-      if (task) {
-        const updatedComments = [...(task.comments || []), newComment];
-        await updateDoc(doc(db, 'tasks', taskId), { comments: updatedComments });
-      }
-    } catch (e) {
-      console.warn('Erro ao adicionar comentário no Firebase:', e);
-    }
-  };
-
-  // Filtrar tarefas se clientId for fornecido (com reconciliação de UUID e slug)
-  const filteredTasks = clientId 
-    ? tasks.filter(t => areIdsMatching(t.client_id, clientId, t.client_name || t.client?.name, ''))
-    : tasks;
-
-  return { 
-    tasks: filteredTasks, 
-    allTasks: tasks, 
-    loading, 
-    createTask, 
-    updateTask, 
-    deleteTask, 
-    toggleChecklist,
-    applyTemplate,
-    addComment 
-  };
-}
+  }

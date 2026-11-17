@@ -4,7 +4,6 @@ import {
   TrendingUp, 
   TrendingDown, 
   AlertCircle, 
-  Download, 
   X, 
   Plus, 
   Target, 
@@ -15,7 +14,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { format, parseISO, addMonths } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { 
   BarChart, 
   Bar, 
@@ -43,17 +42,20 @@ function formatDate(dateStr) {
 function NewInvoiceModal({ onClose, onSave, clients = [] }) {
   const [form, setForm] = useState({ client: '', service: '', amount: '', due_date: '', status: 'pending' });
 
-  const handleSubmit = (e) => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave({
-      client_id: form.client, // We'll pass the ID, but for the mock 'client' name might be needed. The hook can resolve it, but for now we pass ID to 'client' field if needed. To be safe, we'll just pass form.client as client_id and service/amount.
-      client: form.client, // we store the ID here
+    if (saving) return;
+    setSaving(true);
+    const saved = await onSave({
+      client_id: form.client,
       service: form.service,
       amount: Number(form.amount),
       due_date: form.due_date,
-      status: 'pending'
     });
-    onClose();
+    setSaving(false);
+    if (saved) onClose();
   };
 
   return (
@@ -81,7 +83,7 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-cs-text-secondary mb-1 block">Valor (R$)</label>
-              <input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+              <input type="number" min="0.01" max="99999999.99" step="0.01" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
                 placeholder="5000" required
                 className="w-full bg-cs-bg border border-cs-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cs-primary" />
             </div>
@@ -96,9 +98,9 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
               className="flex-1 border border-cs-border text-cs-text-secondary hover:text-white py-2 rounded-lg text-sm transition-colors">
               Cancelar
             </button>
-            <button type="submit"
+            <button type="submit" disabled={saving}
               className="flex-1 bg-cs-primary hover:bg-cs-primary-hover text-white py-2 rounded-lg text-sm font-medium transition-colors">
-              Criar Cobrança
+              {saving ? 'Registrando…' : 'Registrar cobrança'}
             </button>
           </div>
         </form>
@@ -109,10 +111,18 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
 
 export default function FinanceView() {
   const { selectedClient, isAllClients, matchesSelectedClient } = useActiveClient();
-  const { invoices, mrr, overdue, totalPipeline, createInvoice, updateInvoiceStatus } = useInvoices();
+  const { invoices, loading, error, refetch, createInvoice, updateInvoiceStatus } = useInvoices();
   const { data: profitability = [] } = useProfitability();
   const { clients = [] } = useClients();
   const [showNewModal, setShowNewModal] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState(null);
+
+  const handleInvoiceStatus = async (id, status) => {
+    if (pendingUpdate || (status === 'cancelled' && !window.confirm('Cancelar esta cobrança?'))) return;
+    setPendingUpdate(id);
+    try { await updateInvoiceStatus(id, status); }
+    finally { setPendingUpdate(null); }
+  };
 
   const formatCurrency = (value) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
@@ -123,7 +133,7 @@ export default function FinanceView() {
     return invoices.filter(i => matchesSelectedClient(i.client_id) || (i.client && matchesSelectedClient(i.client.id)));
   }, [invoices, isAllClients, matchesSelectedClient]);
 
-  const clientFee = !isAllClients && selectedClient ? Number(selectedClient.monthly_fee || 0) : mrr;
+  const clientFee = !isAllClients && selectedClient ? Number(selectedClient.monthly_fee || 0) : clients.filter(client => client.status === 'active').reduce((total, client) => total + (Number(client.monthly_fee) || 0), 0);
   const clientPaid = displayedInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const clientPending = displayedInvoices.filter(i => i.status === 'pending').reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const overdueCount = displayedInvoices.filter(i => i.status === 'overdue').length;
@@ -133,7 +143,7 @@ export default function FinanceView() {
   const receivablesByMonth = useMemo(() => {
     const groups = {};
     displayedInvoices
-      .filter(i => i.status !== 'paid' && i.due_date)
+      .filter(i => ['pending', 'overdue'].includes(i.status) && i.due_date)
       .forEach(i => {
         const key = String(i.due_date).slice(0, 7);
         if (!groups[key]) {
@@ -302,7 +312,7 @@ export default function FinanceView() {
           <p className="text-[11px] text-cs-text-secondary mb-5">Somente faturas emitidas e ainda não pagas.</p>
           {receivablesByMonth.length === 0 ? (
             <div className="bg-cs-bg/50 border border-cs-border rounded-xl p-4 text-xs text-cs-text-secondary">
-              Nenhuma fatura em aberto. Emita a cobrança do mês em "Nova Cobrança".
+              Nenhuma fatura em aberto. Registre a cobrança do mês em "Nova Cobrança".
             </div>
           ) : (
             <div className="space-y-3">
@@ -329,9 +339,13 @@ export default function FinanceView() {
           <span className="text-xs text-cs-text-secondary font-medium">{displayedInvoices.length} faturas encontradas</span>
         </div>
         <div className="overflow-x-auto">
-          {displayedInvoices.length === 0 ? (
+          {loading ? <p className="p-8 text-sm" role="status">Carregando cobranças…</p> : error ? (
+            <p className="p-8 text-sm text-red-300" role="alert">
+              {error} <button type="button" className="underline" onClick={refetch}>Tentar novamente</button>
+            </p>
+          ) : displayedInvoices.length === 0 ? (
             <div className="p-12 text-center text-xs text-cs-text-secondary">
-              Nenhuma fatura registrada para este cliente ainda. Clique em "Nova Cobrança" para emitir um lançamento.
+              Nenhuma fatura registrada para este cliente ainda. Clique em "Nova Cobrança" para registrar um lançamento.
             </div>
           ) : (
             <table className="w-full text-left">
@@ -358,26 +372,27 @@ export default function FinanceView() {
                       "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border",
                       invoice.status === 'paid' ? "bg-green-500/10 text-green-400 border-green-500/20" :
                       invoice.status === 'pending' ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
+                      invoice.status === 'cancelled' ? "bg-cs-bg text-cs-text-secondary border-cs-border" :
                       "bg-red-500/10 text-red-400 border-red-500/20"
                     )}>
-                      {invoice.status === 'paid' ? 'Pago' : invoice.status === 'pending' ? 'Pendente' : 'Atrasado'}
+                      {invoice.status === 'paid' ? 'Pago' : invoice.status === 'pending' ? 'Pendente' : invoice.status === 'cancelled' ? 'Cancelada' : 'Atrasada'}
                     </span>
                   </td>
                   <td className="px-8 py-5 text-right flex items-center justify-end gap-2">
-                    {invoice.status !== 'paid' ? (
-                      <button 
-                        onClick={() => updateInvoiceStatus(invoice.id, 'paid')}
-                        className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white rounded transition-colors text-xs font-bold"
-                        title="Marcar como Pago"
-                      >
-                        <CheckCircle2 size={14} /> Marcar Pago
-                      </button>
-                    ) : (
-                      <span className="flex items-center gap-1 text-green-500 font-bold text-xs"><CheckCircle2 size={14} /> Pago</span>
+                    {['pending', 'overdue'].includes(invoice.status) && (
+                      <>
+                        <button type="button" disabled={Boolean(pendingUpdate)}
+                          onClick={() => handleInvoiceStatus(invoice.id, 'paid')}
+                          className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white rounded text-xs font-bold">
+                          <CheckCircle2 size={14} /> Registrar pagamento
+                        </button>
+                        <button type="button" disabled={Boolean(pendingUpdate)}
+                          onClick={() => handleInvoiceStatus(invoice.id, 'cancelled')}
+                          className="px-2 py-1 text-cs-text-secondary hover:text-white text-xs">
+                          Cancelar cobrança
+                        </button>
+                      </>
                     )}
-                    <button className="p-2 text-cs-text-secondary hover:text-cs-primary hover:bg-cs-primary/5 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                      <Download size={16} />
-                    </button>
                   </td>
                 </tr>
               ))}

@@ -25,6 +25,7 @@ export default function NewTaskModal({ onClose, onSave, initialClient }) {
     estimated_hours: 1.0
   });
 
+  const [isSaving, setIsSaving] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [rawText, setRawText] = useState('');
   const [showMagic, setShowMagic] = useState(false);
@@ -99,14 +100,20 @@ export default function NewTaskModal({ onClose, onSave, initialClient }) {
     }
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     if (e) e.preventDefault();
     if (!form.title.trim() || !form.client_id) {
       toast.error('Preencha o título e o cliente.');
       return;
     }
-    onSave({ ...form, checklist: suggestedChecklist });
-    onClose();
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const task = await onSave({ ...form, checklist: suggestedChecklist });
+      if (task) onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -269,7 +276,7 @@ export default function NewTaskModal({ onClose, onSave, initialClient }) {
           </button>
           <button
             onClick={handleSave}
-            disabled={!form.title.trim() || !form.client_id}
+            disabled={isSaving || !form.title.trim() || !form.client_id}
             className="flex-1 py-4 bg-cs-primary hover:bg-cs-primary-hover disabled:opacity-30 disabled:grayscale text-white rounded-2xl text-xs font-bold uppercase tracking-widest transition-all shadow-xl shadow-cs-primary/20 flex items-center justify-center gap-2"
           >
             <Sparkles size={16} /> CRIAR TAREFA

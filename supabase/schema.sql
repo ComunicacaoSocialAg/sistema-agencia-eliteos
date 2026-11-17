@@ -261,18 +261,20 @@ from metrics;
 -- ============================================================
 -- 14. TRIGGERS E FUNÇÕES
 -- ============================================================
-create or replace function log_changes() returns trigger as $$
+create or replace function public.log_changes() returns trigger
+language plpgsql security definer set search_path = '' as $$
 begin
-    if (TG_TABLE_NAME = 'tasks' and OLD.status is distinct from NEW.status) then
-        insert into audit_logs (entity_type, entity_id, action, old_value, new_value)
+    if (TG_TABLE_SCHEMA = 'public' and TG_TABLE_NAME = 'tasks' and OLD.status is distinct from NEW.status) then
+        insert into public.audit_logs (entity_type, entity_id, action, old_value, new_value)
         values ('task', NEW.id, 'status_change', jsonb_build_object('status', OLD.status), jsonb_build_object('status', NEW.status));
-    elsif (TG_TABLE_NAME = 'task_deliverables' and OLD.status is distinct from NEW.status) then
-        insert into audit_logs (entity_type, entity_id, action, old_value, new_value)
+    elsif (TG_TABLE_SCHEMA = 'public' and TG_TABLE_NAME = 'task_deliverables' and OLD.status is distinct from NEW.status) then
+        insert into public.audit_logs (entity_type, entity_id, action, old_value, new_value)
         values ('deliverable', NEW.id, 'status_update', jsonb_build_object('status', OLD.status), jsonb_build_object('status', NEW.status));
     end if;
     return NEW;
 end;
-$$ language plpgsql;
+$$;
+revoke execute on function public.log_changes() from public, anon, authenticated;
 
 drop trigger if exists tr_log_tasks on tasks;
 create trigger tr_log_tasks after update on tasks for each row execute function log_changes();
@@ -333,7 +335,23 @@ create policy "Agency full access whatsapp_logs" on whatsapp_logs for all using 
 
 -- ---- PERFIS (todos veem seu próprio) ----
 create policy "Users view own profile" on profiles for select using (id = auth.uid());
-create policy "Agency manage all profiles" on profiles for all using (auth.uid() in (select id from profiles where role = 'admin'));
+create schema if not exists agency_private;
+revoke all on schema agency_private from public;
+grant usage on schema agency_private to authenticated;
+
+-- Consulta só o papel do próprio usuário e evita recursão na política de profiles.
+create or replace function agency_private.is_admin() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.profiles where id = (select auth.uid()) and role = 'admin'
+  );
+$$;
+revoke execute on function agency_private.is_admin() from public, anon, authenticated;
+grant execute on function agency_private.is_admin() to authenticated;
+
+create policy "Agency manage all profiles" on profiles for all to authenticated
+using ((select agency_private.is_admin()))
+with check ((select agency_private.is_admin()));
 
 -- ---- CLIENTE (só vê seus dados) ----
 create policy "Client view own client_data" on clients for select using (id = (select client_id from profiles where id = auth.uid()));

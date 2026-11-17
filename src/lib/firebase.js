@@ -1,51 +1,20 @@
-// Firebase configuration — CS Ag OS
-// Substitui o Supabase como banco de dados principal.
-// O sistema funciona em modo demo completo sem variáveis de ambiente.
+// Firebase stub: CS Ag OS utiliza Supabase (PostgreSQL) como banco oficial.
+// Este stub previne o carregamento do bundle pesado de webchannel do Firebase.
 
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+export const isFirebaseConfigured = false;
+export const app = null;
+export const auth = null;
+export const db = null;
+export const storage = null;
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
-
-const isPlaceholder = (val) => !val || val === 'undefined' || val.includes('SEU_');
-
-export const isFirebaseConfigured =
-  !isPlaceholder(firebaseConfig.apiKey) &&
-  !isPlaceholder(firebaseConfig.projectId);
-
-let app = null;
-let auth = null;
-let db = null;
-let storage = null;
-
-if (isFirebaseConfigured) {
-  try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    storage = getStorage(app);
-    console.log('[Firebase] Configurado e conectado.');
-  } catch (e) {
-    console.warn('[Firebase] Erro ao inicializar:', e.message);
-  }
-} else {
-  console.warn(
-    '[CS Ag OS] Firebase não configurado. ' +
-    'Crie um arquivo .env com as variáveis VITE_FIREBASE_*. ' +
-    'O sistema rodará em modo demonstração com dados locais.'
-  );
-}
-
-export { app, auth, db, storage };
+export const collection = () => ({});
+export const onSnapshot = () => () => {};
+export const doc = () => ({});
+export const updateDoc = async () => {};
+export const setDoc = async () => {};
+export const deleteDoc = async () => {};
+export const query = () => ({});
+export const where = () => ({});
 
 // Google Drive API config
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || null;

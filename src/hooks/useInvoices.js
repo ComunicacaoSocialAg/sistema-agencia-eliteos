@@ -1,135 +1,119 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-// Cache local usado apenas quando o Supabase não está configurado ou está fora do ar.
-// Nunca há faturas pré-preenchidas: o financeiro começa vazio e só mostra o que foi emitido.
 const LOCAL_KEY = 'csag_invoices_v2';
+const INVOICE_FIELDS = '*, client:clients(id, name)';
+const todayInBrazil = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
 
 function readLocal() {
   try {
-    const raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data = JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
 }
 
-function writeLocal(items) {
-  try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(items));
-  } catch (e) {
-    console.warn('Erro ao salvar faturas localmente:', e);
-  }
-}
-
-// Fatura vencida e não paga passa a contar como atrasada, sem depender de alguém marcar manualmente.
 function withComputedStatus(invoice) {
-  if (invoice.status === 'pending' && invoice.due_date) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (String(invoice.due_date).slice(0, 10) < today) {
-      return { ...invoice, status: 'overdue' };
-    }
-  }
-  return invoice;
+  return invoice.status === 'pending' && invoice.due_date && invoice.due_date < todayInBrazil()
+    ? { ...invoice, status: 'overdue' }
+    : invoice;
 }
 
 export function useInvoices() {
+  const { isDemoMode, role } = useAuth();
+  const remote = isSupabaseConfigured && !isDemoMode;
+  const allowed = !remote || role === 'admin';
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const fetchInvoices = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setInvoices(readLocal().map(withComputedStatus));
-      setLoading(false);
-      return;
-    }
+    if (!allowed) return;
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('*, client:clients(id, name)')
-        .order('due_date');
-      if (error) throw error;
-      setInvoices((data || []).map(withComputedStatus));
-    } catch (e) {
-      console.warn('[Invoices] Falha ao ler do Supabase, usando cache local:', e?.message);
-      setInvoices(readLocal().map(withComputedStatus));
+      if (remote) {
+        const { data, error } = await supabase.from('invoices').select(INVOICE_FIELDS).order('due_date');
+        if (error) throw error;
+        setInvoices(data.map(withComputedStatus));
+      } else {
+        setInvoices(readLocal().map(withComputedStatus));
+      }
+      setError('');
+    } catch {
+      setError('Não foi possível carregar as cobranças.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [allowed, remote]);
 
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
+  useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
 
-  const sumBy = (status) => invoices
-    .filter(i => i.status === status)
-    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-
-  const mrr = sumBy('paid');
-  const overdue = sumBy('overdue');
-  const pending = sumBy('pending');
-  const totalPipeline = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-
-  const createInvoice = async (invoiceData) => {
-    const payload = {
-      client_id: invoiceData.client_id,
-      service: invoiceData.service,
-      amount: Number(invoiceData.amount) || 0,
-      due_date: invoiceData.due_date,
-      status: 'pending'
-    };
-
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('invoices')
-        .insert(payload)
-        .select('*, client:clients(id, name)')
-        .single();
-      if (error) {
-        toast.error(`A cobrança não foi salva: ${error.message}`);
-        return null;
-      }
-      setInvoices(prev => [...prev, withComputedStatus(data)]);
-      toast.success('Cobrança emitida e salva no banco.');
-      return data;
+  const createInvoice = async ({ client_id, service, amount, due_date }) => {
+    if (!allowed) return null;
+    const value = Number(amount);
+    if (!client_id || !service?.trim() || !Number.isFinite(value) || value <= 0 || !due_date) {
+      toast.error('Preencha cliente, descrição, valor e vencimento.');
+      return null;
     }
-
-    const local = { ...payload, id: `inv-${Date.now()}`, created_at: new Date().toISOString() };
-    const updated = [...readLocal(), local];
-    writeLocal(updated);
-    setInvoices(updated.map(withComputedStatus));
-    toast.success('Cobrança salva neste navegador (Supabase não configurado).');
-    return local;
+    const payload = { client_id, service: service.trim(), amount: value, due_date, status: 'pending' };
+    try {
+      let invoice;
+      if (remote) {
+        const { data, error } = await supabase.from('invoices').insert(payload).select(INVOICE_FIELDS).single();
+        if (error || !data) throw error;
+        invoice = data;
+      } else {
+        invoice = { ...payload, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+        localStorage.setItem(LOCAL_KEY, JSON.stringify([...readLocal(), invoice]));
+      }
+      setInvoices(items => [...items, withComputedStatus(invoice)]);
+      toast.success('Cobrança registrada.');
+      return invoice;
+    } catch {
+      toast.error('A cobrança não foi registrada. Confira os dados e tente novamente.');
+      return null;
+    }
   };
 
-  const updateInvoiceStatus = async (invoiceId, newStatus) => {
-    const update = { status: newStatus, paid_at: newStatus === 'paid' ? new Date().toISOString() : null };
-
-    if (isSupabaseConfigured) {
-      const { error } = await supabase.from('invoices').update(update).eq('id', invoiceId);
-      if (error) {
-        toast.error(`Não foi possível atualizar a fatura: ${error.message}`);
-        return;
+  const updateInvoiceStatus = async (id, status) => {
+    if (!allowed || !['paid', 'cancelled'].includes(status)) return false;
+    const update = { status, paid_at: status === 'paid' ? new Date().toISOString() : null };
+    try {
+      let invoice;
+      if (remote) {
+        const { data, error } = await supabase.from('invoices').update(update).eq('id', id)
+          .in('status', ['pending', 'overdue']).select(INVOICE_FIELDS).single();
+        if (error || !data) throw error;
+        invoice = data;
+      } else {
+        const stored = readLocal();
+        const current = stored.find(item => item.id === id);
+        if (!current || !['pending', 'overdue'].includes(current.status)) return false;
+        invoice = { ...current, ...update };
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(stored.map(item => item.id === id ? invoice : item)));
       }
-    } else {
-      writeLocal(readLocal().map(i => (i.id === invoiceId ? { ...i, ...update } : i)));
+      setInvoices(items => items.map(item => item.id === id ? invoice : item));
+      toast.success(status === 'paid' ? 'Pagamento registrado.' : 'Cobrança cancelada.');
+      return true;
+    } catch {
+      toast.error('A mudança não foi confirmada. Atualize a lista e tente novamente.');
+      return false;
     }
-
-    setInvoices(prev => prev.map(i => (i.id === invoiceId ? withComputedStatus({ ...i, ...update }) : i)));
-    toast.success(newStatus === 'paid' ? 'Fatura marcada como paga.' : 'Status da fatura atualizado.');
   };
 
+  const visible = allowed ? invoices : [];
+  const sum = (filter) => visible.filter(filter).reduce((total, item) => total + (Number(item.amount) || 0), 0);
   return {
-    invoices,
-    loading,
-    mrr,
-    overdue,
-    pending,
-    totalPipeline,
-    createInvoice,
-    updateInvoiceStatus,
-    refetch: fetchInvoices
+    invoices: visible, loading: allowed && loading, error,
+    mrr: sum(item => item.status === 'paid' && item.paid_at?.startsWith(todayInBrazil().slice(0, 7))),
+    overdue: sum(item => item.status === 'overdue'),
+    pending: sum(item => item.status === 'pending'),
+    totalPipeline: sum(item => item.status !== 'cancelled'),
+    createInvoice, updateInvoiceStatus, refetch: fetchInvoices,
   };
 }

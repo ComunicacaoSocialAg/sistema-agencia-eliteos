@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   X, ChevronRight, ChevronLeft, Folder, Users, Building2,
   Zap, Plus, Trash2, Calendar, DollarSign, FolderOpen, Check
 } from 'lucide-react';
 import { cn } from '../utils/cn';
-import { PROJECT_TYPES, PROJECT_TEMPLATES, generateProjectTasks } from '../lib/projectTemplates';
+import { PROJECT_TYPES, PROJECT_TEMPLATES } from '../lib/projectTemplates';
 
 // ─── Passo 1: Tipo do Projeto ─────────────────────────────────────────────────
-function StepType({ selected, onSelect }) {
+function StepType({ selected, onSelect, allowProposal }) {
   return (
     <div className="space-y-4">
       <div>
@@ -15,7 +15,7 @@ function StepType({ selected, onSelect }) {
         <p className="text-xs text-cs-text-secondary">Escolha o tipo para carregar o template de tarefas padrão.</p>
       </div>
       <div className="grid grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
-        {PROJECT_TYPES.map(type => (
+        {PROJECT_TYPES.filter(type => allowProposal || type.id !== 'proposta').map(type => (
           <button
             key={type.id}
             onClick={() => onSelect(type.id)}
@@ -50,7 +50,7 @@ function StepDetails({ form, setForm, clients, selectedType }) {
         <h3 className="text-lg font-bold text-white mb-1">Detalhes do Projeto</h3>
         <p className="text-xs text-cs-text-secondary">
           {isProposal
-            ? 'Um deal será criado automaticamente no CRM e uma pasta no Google Drive.'
+            ? 'O projeto também registra a proposta no CRM.'
             : isInternal
             ? 'Projeto interno da agência, sem vínculo com cliente externo.'
             : 'Preencha os dados do projeto para gerar as tarefas automaticamente.'}
@@ -84,17 +84,17 @@ function StepDetails({ form, setForm, clients, selectedType }) {
                 const c = clients.find(x => x.id === e.target.value);
                 setForm(f => ({ ...f, client_id: e.target.value, client_name: c?.name || '' }));
               }}
-              className="col-span-1 bg-cs-bg border border-cs-border rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-cs-primary"
+              className={cn(isProposal ? "col-span-1" : "col-span-2", "bg-cs-bg border border-cs-border rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-cs-primary")}
             >
               <option value="">Selecionar cliente existente</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <input
+            {isProposal && <input
               value={form.client_name}
               onChange={e => setForm(f => ({ ...f, client_id: '', client_name: e.target.value }))}
               placeholder="Ou digitar nome do prospect"
               className="col-span-1 bg-cs-bg border border-cs-border rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-cs-primary placeholder:text-cs-text-secondary/50"
-            />
+            />}
           </div>
         </div>
       )}
@@ -157,6 +157,13 @@ function StepDetails({ form, setForm, clients, selectedType }) {
 }
 
 // ─── Passo 3: Template de Tarefas ─────────────────────────────────────────────
+function taskDeadline(startDate, dayOffset) {
+  if (!startDate) return null;
+  const date = new Date(startDate + 'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate() + (Number(dayOffset) || 0));
+  return date.toISOString().slice(0, 10);
+}
+
 function StepTasks({ tasks, setTasks, startDate }) {
   const TAGS = ['Social Media', 'Branding', 'Vídeo', 'Web', 'Campanha'];
   const MEMBERS = ['Bruno'];
@@ -180,12 +187,7 @@ function StepTasks({ tasks, setTasks, startDate }) {
     setTasks(prev => prev.map((t, i) => i === index ? { ...t, [field]: value } : t));
   };
 
-  const getDeadline = (dayOffset) => {
-    if (!startDate) return '';
-    const d = new Date(startDate);
-    d.setDate(d.getDate() + (dayOffset || 0));
-    return d.toLocaleDateString('pt-BR');
-  };
+  const getDeadline = dayOffset => taskDeadline(startDate, dayOffset)?.split('-').reverse().join('/') || '';
 
   return (
     <div className="space-y-4">
@@ -326,7 +328,7 @@ function StepConfirm({ form, tasks, selectedType }) {
         {isProposal && (
           <div className="flex items-center gap-2 text-xs text-cs-text-secondary">
             <Building2 size={12} className="text-cs-primary" />
-            <span>Um deal será criado automaticamente no CRM.</span>
+            <span>A proposta será registrada no CRM.</span>
           </div>
         )}
       </div>
@@ -342,8 +344,10 @@ const STEPS = [
   { id: 'confirm', label: 'Confirmar' },
 ];
 
-export default function NewProjectModal({ onClose, onSave, clients = [] }) {
+export default function NewProjectModal({ onClose, onSave, clients = [], allowProposal = true }) {
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const projectId = useRef(null);
   const [selectedType, setSelectedType] = useState('');
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState({
@@ -361,7 +365,7 @@ export default function NewProjectModal({ onClose, onSave, clients = [] }) {
     // Pré-carrega tasks do template
     const template = PROJECT_TEMPLATES[typeId];
     if (template) {
-      setTasks(template.tasks.map((t, i) => ({ ...t, id: `tpl-${i}` })));
+      setTasks(template.tasks.map((t, i) => ({ ...t, day_offset: t.day, id: `tpl-${i}` })));
       if (!form.name) {
         setForm(f => ({ ...f, name: template.name }));
       }
@@ -370,22 +374,36 @@ export default function NewProjectModal({ onClose, onSave, clients = [] }) {
 
   const canProceed = () => {
     if (step === 0) return !!selectedType;
-    if (step === 1) return !!form.name.trim();
-    return true;
+    if (step === 1) {
+      const validDates = !form.start_date || !form.end_date || form.end_date >= form.start_date;
+      const validClient = selectedType === 'interno' || (selectedType === 'proposta' ? form.client_name.trim() : form.client_id);
+      return Boolean(form.name.trim() && validDates && validClient);
+    }
+    return tasks.every(task => task.title.trim());
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
+    if (saving) return;
+    setSaving(true);
+    projectId.current ||= crypto.randomUUID();
     const projectData = {
       ...form,
+      id: projectId.current,
+      name: form.name.trim(),
+      client_id: selectedType === 'interno' ? null : form.client_id || null,
+      client_name: selectedType === 'interno' ? '' : form.client_name.trim(),
       type: selectedType,
       type_label: PROJECT_TYPES.find(t => t.id === selectedType)?.label || selectedType,
       value: Number(form.value) || 0,
       is_internal: selectedType === 'interno',
       is_proposal: selectedType === 'proposta',
-      tasks,
+      tasks: tasks.map(task => ({ ...task, deadline: taskDeadline(form.start_date, task.day_offset) })),
     };
-    onSave(projectData);
-    onClose();
+    try {
+      if (await onSave(projectData)) onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const currentStepId = STEPS[step].id;
@@ -429,7 +447,7 @@ export default function NewProjectModal({ onClose, onSave, clients = [] }) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-          {currentStepId === 'type' && <StepType selected={selectedType} onSelect={handleTypeSelect} />}
+          {currentStepId === 'type' && <StepType selected={selectedType} onSelect={handleTypeSelect} allowProposal={allowProposal} />}
           {currentStepId === 'details' && <StepDetails form={form} setForm={setForm} clients={clients} selectedType={selectedType} />}
           {currentStepId === 'tasks' && <StepTasks tasks={tasks} setTasks={setTasks} startDate={form.start_date} />}
           {currentStepId === 'confirm' && <StepConfirm form={form} tasks={tasks} selectedType={selectedType} />}
@@ -454,10 +472,10 @@ export default function NewProjectModal({ onClose, onSave, clients = [] }) {
             </button>
           ) : (
             <button
-              onClick={handleFinish}
+              onClick={handleFinish} disabled={saving}
               className="flex items-center gap-2 px-5 py-2 bg-cs-primary hover:bg-cs-primary-hover text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-cs-primary/20"
             >
-              <Zap size={16} /> Disparar Projeto
+              <Zap size={16} /> {saving ? 'Salvando…' : 'Criar projeto'}
             </button>
           )}
         </div>

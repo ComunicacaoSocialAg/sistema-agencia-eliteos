@@ -1,66 +1,68 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { useTasks } from './useTasks';
+import { useClients } from './useClients';
+import { APPROVAL_EVENT, useAllDeliverables } from './useDeliverables';
 
-export function useClientPortal(clientId) {
-  const [dashboard, setDashboard] = useState({
-    campaigns: [],
-    monthlyHours: 0,
-    nextDeliveries: [],
-    approvals: [],
-    npsPending: false
-  });
-  const [loading, setLoading] = useState(true);
+export function useClientPortal() {
+  const { user, profile, isDemoMode } = useAuth();
+  const { allTasks, createTask } = useTasks();
+  const { clients } = useClients();
+  const { deliverables } = useAllDeliverables();
+  const account = profile?.role === 'client' && profile?.client_id ? user?.id : null;
+  const [result, setResult] = useState(null);
+  const version = useRef(0);
 
-  const fetchPortalData = useCallback(async () => {
-    if (!clientId) return;
-    
-    if (!isSupabaseConfigured) {
-      // Mock data for portal demo
-      setDashboard({
-        campaigns: [
-          { name: 'Campanha de Inverno', spent: 2500, roas: 4.2 },
-          { name: 'Google Search Institucional', spent: 1200, roas: 3.8 }
-        ],
-        monthlyHours: 42.5,
-        nextDeliveries: [
-          { title: 'Landing Page v1', deadline: '2026-05-10' },
-          { title: 'Posts Redes Sociais', deadline: '2026-05-12' }
-        ],
-        approvals: [
-          { item: 'Logotipo V2', date: '2026-05-01', status: 'approved' },
-          { item: 'Vídeo Manifesto', date: '2026-04-28', status: 'approved' }
-        ],
-        npsPending: true
-      });
-      setLoading(false);
-      return;
+  const refresh = useCallback(async () => {
+    if (!account || isDemoMode) return;
+    const id = ++version.current;
+    try {
+      const { data, error } = await supabase.rpc('client_portal');
+      if (error) throw error;
+      if (id === version.current) setResult({ account, client: data?.client, projects: data?.projects || [], tasks: data?.tasks || [], error: '' });
+    } catch {
+      if (id === version.current) setResult({ account, error: 'Não foi possível carregar a sua área.' });
     }
-
-    setLoading(true);
-
-    const [campaignsRes, tasksRes, approvalsRes] = await Promise.all([
-      supabase.from('client_costs').select('*').eq('client_id', clientId).eq('category', 'mídia'),
-      supabase.from('tasks').select('*').eq('client_id', clientId),
-      supabase.from('deliverable_versions').select('*, tasks!inner(client_id)').eq('tasks.client_id', clientId).order('created_at', { ascending: false }).limit(5)
-    ]);
-
-    const activeTasks = tasksRes.data || [];
-    const monthlyHours = activeTasks.reduce((acc, t) => acc + (t.tracked_seconds || 0), 0) / 3600;
-    
-    setDashboard({
-      campaigns: campaignsRes.data || [],
-      monthlyHours: Math.round(monthlyHours * 10) / 10,
-      nextDeliveries: activeTasks.filter(t => t.status !== 'concluido').sort((a, b) => new Date(a.deadline) - new Date(b.deadline)).slice(0, 3),
-      approvals: approvalsRes.data || [],
-      npsPending: activeTasks.some(t => t.status === 'concluido' && !t.nps_sent) // Logic to trigger NPS
-    });
-
-    setLoading(false);
-  }, [clientId]);
+  }, [account, isDemoMode]);
 
   useEffect(() => {
-    fetchPortalData();
-  }, [fetchPortalData]);
+    refresh();
+    window.addEventListener(APPROVAL_EVENT, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      version.current++;
+      window.removeEventListener(APPROVAL_EVENT, refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [refresh]);
 
-  return { dashboard, loading, refetch: fetchPortalData };
+  async function requestTask(values) {
+    if (!account) return null;
+    if (isDemoMode) return createTask({
+      id: values.id, title: values.title, notes: values.notes, tag: values.tag,
+      priority: values.priority, deadline: values.deadline, status: 'briefing',
+      client_id: profile.client_id,
+    });
+    const { data, error } = await supabase.rpc('request_client_task', {
+      p_id: values.id, p_title: values.title, p_notes: values.notes,
+      p_tag: values.tag, p_priority: values.priority, p_deadline: values.deadline,
+    });
+    if (error || !data) throw error || new Error('O envio da solicitação não foi confirmado.');
+    await refresh();
+    return data;
+  }
+
+  if (account && isDemoMode) {
+    const client = clients.find(item => item.id === profile.client_id);
+    return { client, projects: [], tasks: allTasks.filter(task => task.client_id === profile.client_id).map(task => {
+      const latest = deliverables.find(item => item.task_id === task.id);
+      return { ...task, approval_status: latest?.status, version_number: latest?.version_number };
+    }), requestTask, refresh };
+  }
+  const current = result?.account === account ? result : null;
+  return {
+    client: current?.client, projects: current?.projects || [], tasks: current?.tasks || [], error: current?.error,
+    loading: Boolean(account && !current), refresh, requestTask,
+  };
 }

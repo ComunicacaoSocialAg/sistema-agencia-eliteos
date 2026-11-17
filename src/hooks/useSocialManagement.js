@@ -1,200 +1,149 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { useActiveClient, CLIENT_ALIASES } from '../contexts/ActiveClientContext';
+import { useActiveClient } from '../contexts/ActiveClientContext';
+import { useTasks } from './useTasks';
+import { operationId } from '../lib/operationId';
 
-const LOCAL_POSTS_KEY = 'csag_custom_social_posts_v1';
-const LOCAL_METRICS_KEY = 'csag_custom_social_metrics_v1';
+const POSTS_KEY = 'csag_custom_social_posts_v1';
+const METRICS_KEY = 'csag_custom_social_metrics_v1';
+const remote = isSupabaseConfigured;
+
+function readStored(key) {
+  try {
+    const data = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function confirmed({ data, error }) {
+  if (error || !data) throw error || new Error('Gravação não confirmada');
+  return data;
+}
 
 export function useSocialManagement() {
-  const { selectedClientId, selectedClient, isAllClients, matchesSelectedClient } = useActiveClient();
+  const { isAllClients, matchesSelectedClient } = useActiveClient();
+  const { createTask, refresh: refreshTasks } = useTasks();
   const [posts, setPosts] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Buscar dados reais no Supabase
   const fetchData = useCallback(async () => {
     setLoading(true);
-    if (!isSupabaseConfigured || !supabase) {
-      loadFromLocalStorage();
-      setLoading(false);
-      return;
-    }
-
     try {
-      const { data: postsData, error: postsErr } = await supabase
-        .from('social_posts')
-        .select('*')
-        .order('scheduled_date', { ascending: true });
-
-      const { data: metricsData, error: metricsErr } = await supabase
-        .from('social_metrics')
-        .select('*')
-        .order('period_month', { ascending: false });
-
-      if (!postsErr && postsData) {
-        setPosts(postsData);
-        try { localStorage.setItem(LOCAL_POSTS_KEY, JSON.stringify(postsData)); } catch (_) {}
+      if (remote) {
+        const [postsResult, metricsResult] = await Promise.all([
+          supabase.from('social_posts').select('*').order('scheduled_date'),
+          supabase.from('social_metrics').select('*').order('period_month', { ascending: false }),
+        ]);
+        if (!postsResult.error) setPosts(postsResult.data || []);
+        if (!metricsResult.error) setMetrics(metricsResult.data || []);
+        if (postsResult.error || metricsResult.error) throw new Error('Falha de leitura');
       } else {
-        loadFromLocalStorage();
+        setPosts(readStored(POSTS_KEY));
+        setMetrics(readStored(METRICS_KEY));
       }
-
-      if (!metricsErr && metricsData) {
-        setMetrics(metricsData);
-        try { localStorage.setItem(LOCAL_METRICS_KEY, JSON.stringify(metricsData)); } catch (_) {}
-      }
-    } catch (e) {
-      console.warn('Erro ao carregar social management:', e);
-      loadFromLocalStorage();
+      setError('');
+    } catch {
+      setError('Não foi possível carregar todas as pautas e métricas.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const loadFromLocalStorage = () => {
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  async function changePost(id, changes, creating = false) {
     try {
-      const savedPosts = localStorage.getItem(LOCAL_POSTS_KEY);
-      if (savedPosts) setPosts(JSON.parse(savedPosts));
-      const savedMetrics = localStorage.getItem(LOCAL_METRICS_KEY);
-      if (savedMetrics) setMetrics(JSON.parse(savedMetrics));
-    } catch (e) {
-      console.warn(e);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  // Filtrar posts conforme o cliente ativo
-  const filteredPosts = posts.filter(p => {
-    if (isAllClients) return true;
-    return matchesSelectedClient(p.client_id);
-  });
-
-  // Criar nova pauta/post
-  const createPost = async (postData) => {
-    const id = `post-${Date.now()}`;
-    const newPost = {
-      id,
-      client_id: postData.client_id || selectedClient?.id || '87c0b28f-83f0-43ab-aefe-45bda539e8c2',
-      title: postData.title,
-      channel: postData.channel || 'Instagram',
-      format: postData.format || 'Carrossel',
-      status: postData.status || 'pauta',
-      scheduled_date: postData.scheduled_date || new Date().toISOString().split('T')[0],
-      caption: postData.caption || '',
-      visual_concept: postData.visual_concept || '',
-      asset_url: postData.asset_url || '',
-      post_url: postData.post_url || '',
-      medical_compliance_checked: !!postData.medical_compliance_checked,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    setPosts(prev => [newPost, ...prev]);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase.from('social_posts').insert([newPost]);
-        if (error) throw error;
-      } catch (err) {
-        console.warn('Erro ao salvar no Supabase, mantendo local:', err);
+      const values = { ...changes, updated_at: new Date().toISOString() };
+      let saved;
+      if (remote) {
+        const table = supabase.from('social_posts');
+        const operation = creating ? table.insert({ ...values, id })
+          : changes ? table.update(values).eq('id', id) : table.delete().eq('id', id);
+        saved = confirmed(await operation.select().single());
+      } else {
+        const items = readStored(POSTS_KEY);
+        const previous = items.find(post => post.id === id);
+        if (!creating && !previous) return null;
+        saved = { ...previous, ...values, id };
+        if (saved.status === 'publicado') saved.published_at ||= new Date().toISOString();
+        else saved.published_at = null;
+        const next = creating ? [saved, ...items]
+          : changes ? items.map(post => post.id === id ? saved : post) : items.filter(post => post.id !== id);
+        localStorage.setItem(POSTS_KEY, JSON.stringify(next));
       }
+      setPosts(items => creating ? [saved, ...items]
+        : changes ? items.map(post => post.id === id ? saved : post) : items.filter(post => post.id !== id));
+      return saved;
+    } catch {
+      toast.error('A mudança na pauta não foi confirmada. Tente novamente.');
+      return null;
     }
+  }
 
+  async function createPost(values) {
+    if (!values.client_id || !values.title?.trim()) {
+      toast.error('Selecione o cliente e informe o tema da pauta.');
+      return null;
+    }
+    const saved = await changePost('post-' + crypto.randomUUID(), {
+      ...values, title: values.title.trim(), created_at: new Date().toISOString(),
+    }, true);
+    if (saved) toast.success('Pauta registrada.');
+    return saved;
+  }
+
+  async function prepareApproval(post) {
+    if (!post.client_id) return null;
     try {
-      const current = JSON.parse(localStorage.getItem(LOCAL_POSTS_KEY) || '[]');
-      localStorage.setItem(LOCAL_POSTS_KEY, JSON.stringify([newPost, ...current]));
-    } catch (_) {}
-
-    toast.success('Pauta cadastrada com sucesso!');
-    return newPost;
-  };
-
-  // Atualizar status do post
-  const updatePostStatus = async (postId, newStatus) => {
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: newStatus, updated_at: new Date().toISOString() } : p));
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('social_posts').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', postId);
-      } catch (e) {
-        console.warn(e);
+      if (remote) {
+        const taskId = confirmed(await supabase.rpc('prepare_social_post_approval', { p_post_id: post.id }));
+        setPosts(items => items.map(item => item.id === post.id ? { ...item, task_id: taskId } : item));
+        await refreshTasks();
+        return taskId;
       }
+      const task = await createTask({
+        id: await operationId('social-' + post.id, false), title: post.title, client_id: post.client_id,
+        notes: [post.caption, post.visual_concept].filter(Boolean).join('\n\n'),
+        tag: 'Social Media', status: 'revisao-interna', deadline: post.scheduled_date || null,
+      });
+      return task && await changePost(post.id, { task_id: task.id }) ? task.id : null;
+    } catch {
+      toast.error('Não foi possível vincular a pauta à aprovação. Confira o cliente e tente novamente.');
+      return null;
     }
+  }
 
+  async function saveMonthlyMetric(values) {
+    if (!values.client_id || !/^\d{4}-\d{2}$/.test(values.period_month)) {
+      toast.error('Selecione o cliente e o mês de referência.');
+      return null;
+    }
+    const item = { ...values, id: `metric-${values.client_id}-${values.period_month}`, updated_at: new Date().toISOString() };
     try {
-      const current = JSON.parse(localStorage.getItem(LOCAL_POSTS_KEY) || '[]');
-      const updated = current.map(p => p.id === postId ? { ...p, status: newStatus } : p);
-      localStorage.setItem(LOCAL_POSTS_KEY, JSON.stringify(updated));
-    } catch (_) {}
-
-    toast.success(`Status atualizado para: ${newStatus}`);
-  };
-
-  // Atualizar dados completos do post
-  const updatePost = async (postId, updates) => {
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, ...updates, updated_at: new Date().toISOString() } : p));
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('social_posts').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', postId);
-      } catch (e) {
-        console.warn(e);
-      }
+      const saved = remote ? confirmed(await supabase.from('social_metrics').upsert(item).select().single()) : item;
+      if (!remote) localStorage.setItem(METRICS_KEY, JSON.stringify([saved, ...readStored(METRICS_KEY).filter(row => row.id !== saved.id)]));
+      setMetrics(rows => [saved, ...rows.filter(row => row.id !== saved.id)]);
+      toast.success('Métricas mensais registradas.');
+      return saved;
+    } catch {
+      toast.error('As métricas não foram salvas. Tente novamente.');
+      return null;
     }
-
-    toast.success('Pauta atualizada com sucesso!');
-  };
-
-  // Excluir post
-  const deletePost = async (postId) => {
-    setPosts(prev => prev.filter(p => p.id !== postId));
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('social_posts').delete().eq('id', postId);
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-
-    toast.success('Pauta removida.');
-  };
-
-  // Salvar registro de métricas mensais reais
-  const saveMonthlyMetric = async (metricData) => {
-    const id = `metric-${metricData.client_id}-${metricData.period_month}`;
-    const item = {
-      id,
-      ...metricData,
-      updated_at: new Date().toISOString()
-    };
-
-    setMetrics(prev => [item, ...prev.filter(m => m.id !== id)]);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('social_metrics').upsert([item]);
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-
-    toast.success('Métricas mensais salvas com sucesso!');
-  };
+  }
 
   return {
-    posts: filteredPosts,
-    allPosts: posts,
-    metrics,
-    loading,
-    createPost,
-    updatePostStatus,
-    updatePost,
-    deletePost,
+    posts: isAllClients ? posts : posts.filter(post => matchesSelectedClient(post.client_id)),
+    allPosts: posts, metrics: isAllClients ? metrics : metrics.filter(item => matchesSelectedClient(item.client_id)),
+    loading, error, createPost, prepareApproval,
+    updatePostStatus: (id, status) => changePost(id, { status }),
+    updatePost: changePost,
+    deletePost: id => changePost(id, null),
     saveMonthlyMetric,
-    refreshData: fetchData
+    refreshData: fetchData,
   };
 }

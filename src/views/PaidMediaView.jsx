@@ -18,7 +18,7 @@ const STATUS_CONFIG = {
 
 export default function PaidMediaView() {
   const { selectedClient, isAllClients, clients } = useActiveClient();
-  const { campaigns, reports, loading, createCampaign, updateCampaignStatus, deleteCampaign, addCampaignReport } = useCampaignManagement();
+  const { campaigns, reports, loading, error, refreshData, createCampaign, updateCampaignStatus, deleteCampaign, addCampaignReport } = useCampaignManagement();
 
   const [platformFilter, setPlatformFilter] = useState('todas');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -40,7 +40,7 @@ export default function PaidMediaView() {
   // Form de prestação de contas mensal
   const [newReport, setNewReport] = useState({
     client_id: selectedClient?.id || clients[0]?.id || '',
-    period_label: 'Outubro/2026',
+    period_label: '',
     invested_amount: '',
     conversions_count: '',
     cpa_real: '',
@@ -64,13 +64,14 @@ export default function PaidMediaView() {
       return;
     }
 
-    await createCampaign({
+    const saved = await createCampaign({
       ...newCampaign,
-      client_id: isAllClients ? (newCampaign.client_id || clients[0]?.id) : (selectedClient?.id || clients[0]?.id),
+      client_id: isAllClients ? newCampaign.client_id : selectedClient?.id,
       budget_monthly: Number(newCampaign.budget_monthly) || 0,
       budget_daily: Number(newCampaign.budget_daily) || 0
     });
 
+    if (!saved) return;
     setShowAddModal(false);
     setNewCampaign({
       client_id: selectedClient?.id || clients[0]?.id || '',
@@ -92,16 +93,19 @@ export default function PaidMediaView() {
       return;
     }
 
-    await addCampaignReport({
+    const saved = await addCampaignReport({
       ...newReport,
-      client_id: isAllClients ? (newReport.client_id || clients[0]?.id) : (selectedClient?.id || clients[0]?.id)
+      client_id: isAllClients ? newReport.client_id : selectedClient?.id
     });
 
-    setShowReportModal(false);
+    if (saved) setShowReportModal(false);
   };
 
   return (
     <div className="h-full flex flex-col bg-cs-bg text-cs-text-primary overflow-hidden">
+      {error && <p role="alert" className="px-6 py-2 text-sm text-red-300">
+        {error} <button type="button" className="underline" onClick={refreshData}>Tentar novamente</button>
+      </p>}
       {/* Header */}
       <header className="bg-cs-surface border-b border-cs-border px-6 py-4 shrink-0">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -307,7 +311,7 @@ export default function PaidMediaView() {
                         </a>
                       )}
                       <button
-                        onClick={() => deleteCampaign(camp.id)}
+                        onClick={() => window.confirm('Remover o registro da campanha?') && deleteCampaign(camp.id)}
                         className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-cs-bg transition-colors"
                         title="Remover campanha"
                       >
@@ -384,10 +388,18 @@ export default function PaidMediaView() {
 
             <h2 className="text-lg font-bold text-white mb-1">Cadastrar Nova Campanha de Tráfego</h2>
             <p className="text-xs text-cs-text-secondary mb-5">
-              Cliente: <strong className="text-white">{selectedClient?.name || 'Cliente Ativo'}</strong>
+              Registro interno de status e orçamento da campanha.
             </p>
 
             <form onSubmit={handleCreateCampaign} className="space-y-4">
+              {isAllClients && <label className="block text-xs text-white">
+                Cliente
+                <select value={newCampaign.client_id} onChange={event => setNewCampaign(current => ({ ...current, client_id: event.target.value }))} required
+                  className="mt-1 w-full rounded-lg border border-cs-border bg-cs-bg p-2">
+                  <option value="">Selecione um cliente</option>
+                  {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </label>}
               <div>
                 <label className="text-xs font-semibold text-white mb-1 block">Nome da Campanha</label>
                 <input
@@ -513,11 +525,19 @@ export default function PaidMediaView() {
             </p>
 
             <form onSubmit={handleAddReport} className="space-y-3.5">
+              {isAllClients && <label className="block text-xs text-white">
+                Cliente
+                <select value={newReport.client_id} onChange={event => setNewReport(current => ({ ...current, client_id: event.target.value }))} required
+                  className="mt-1 w-full rounded-lg border border-cs-border bg-cs-bg p-2">
+                  <option value="">Selecione um cliente</option>
+                  {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </label>}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-white mb-1 block">Mês/Ano de Referência</label>
                   <input
-                    type="text"
+                    type="month"
                     value={newReport.period_label}
                     onChange={e => setNewReport({ ...newReport, period_label: e.target.value })}
                     placeholder="Ex: Outubro/2026"

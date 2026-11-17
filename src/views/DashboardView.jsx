@@ -10,7 +10,7 @@ import { useProjects } from '../hooks/useProjects';
 import { useAuth } from '../contexts/AuthContext';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { format, isToday, isTomorrow, isThisWeek, isPast, parseISO, differenceInDays } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { generateContent } from '../lib/gemini';
 import { cn as clsxCn } from '../utils/cn';
 import TaskModal from '../components/TaskModal';

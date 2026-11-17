@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { collection, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { collection, onSnapshot, doc, updateDoc, setDoc, db, isFirebaseConfigured } from '../lib/firebase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const EXTENDED_META_KEY = 'csag_clients_extended_meta_v2';
@@ -189,7 +189,13 @@ const SUPABASE_SAFE_COLUMNS = [
   'tone_of_voice',
   'target_audience',
   'value_proposition',
-  'notes'
+  'notes', 'logo_url', 'monthly_hours_contracted', 'lifecycle_stage', 'social_media_config', 'reportei_config',
+];
+
+const METADATA_COLUMNS = [
+  'document_id', 'billing_day', 'contract_start_date', 'contract_end_date', 'drive_url',
+  'reportei_url', 'strategic_goals', 'primary_color', 'secondary_color', 'accent_color', 'typography',
+  'keywords', 'assets', 'industry', 'website', 'instagram', 'logo_variations', 'forms_url', 'ai_instructions',
 ];
 
 function buildSafeSupabasePayload(clientObj) {
@@ -199,67 +205,57 @@ function buildSafeSupabasePayload(clientObj) {
       payload[col] = clientObj[col];
     }
   }
+  const metadata = Object.fromEntries(METADATA_COLUMNS.filter(key => clientObj[key] !== undefined)
+    .map(key => [key, clientObj[key]]));
+  if (Object.keys(metadata).length) payload.agency_metadata = { ...clientObj.agency_metadata, ...metadata };
   return payload;
 }
 
-export function useClients() {
-  const [clients, setClients] = useState(getStoredClients);
-  const [loading, setLoading] = useState(true);
+function presentRemoteClient(client) {
+  const metadata = Object.fromEntries(METADATA_COLUMNS.filter(key => client.agency_metadata?.[key] !== undefined)
+    .map(key => [key, client.agency_metadata[key]]));
+  return { ...client, ...metadata, primary_color: metadata.primary_color || client.brand_color };
+}
 
-  useEffect(() => {
-    const handleSync = (e) => {
-      if (Array.isArray(e?.detail)) {
-        setClients(e.detail);
-      } else {
-        setClients(getStoredClients());
-      }
-    };
-    window.addEventListener('csag:clients-updated', handleSync);
-    return () => window.removeEventListener('csag:clients-updated', handleSync);
-  }, []);
+export function useClients() {
+  const { isDemoMode, role } = useAuth();
+  const remote = isSupabaseConfigured && !isDemoMode;
+  const allowed = !remote || ['admin', 'commercial', 'production'].includes(role);
+  const [clients, setClients] = useState(() => remote ? [] : getStoredClients());
+  const [loading, setLoading] = useState(allowed);
+  const [error, setError] = useState('');
 
   const fetchSupabaseClients = useCallback(async () => {
-    if (!isSupabaseConfigured || !supabase) return false;
+    if (!remote || !allowed || !supabase) return false;
     try {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .neq('status', 'prospect')
-        .order('created_at', { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        const enrichedRemote = data.map(enrichClientWithLocalMeta);
-        // Preservar clientes criados localmente que ainda não estejam na resposta remota
-        const currentLocal = getStoredClients();
-        const localExtras = currentLocal.filter(
-          loc => !enrichedRemote.some(rem => areIdsMatching(rem.id, loc.id, rem.name, loc.name))
-        );
-        const merged = [...enrichedRemote, ...localExtras];
-        setClients(merged);
-        localStorage.setItem(CUSTOM_CLIENTS_KEY, JSON.stringify(merged));
-        setLoading(false);
-        return true;
-      }
-    } catch (err) {
-      console.warn('[Supabase] Erro ao buscar clientes:', err);
+      const { data, error } = await supabase.from('clients').select('*')
+        .neq('status', 'prospect').order('created_at', { ascending: false });
+      if (error) throw error;
+      setClients(data.map(presentRemoteClient));
+      setError('');
+      return true;
+    } catch {
+      setError('Não foi possível carregar as fichas dos clientes.');
+      return false;
+    } finally {
+      setLoading(false);
     }
-    return false;
-  }, []);
+  }, [allowed, remote]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    if (isSupabaseConfigured && supabase) {
-      fetchSupabaseClients().then(success => {
-        if (!success && isMounted) {
-          const stored = getStoredClients();
-          setClients(stored);
-          setLoading(false);
-        }
-      });
-      return () => { isMounted = false; };
+    if (!allowed) return;
+    if (remote) {
+      fetchSupabaseClients();
+      window.addEventListener('csag:remote-clients-changed', fetchSupabaseClients);
+      return () => window.removeEventListener('csag:remote-clients-changed', fetchSupabaseClients);
     }
+    const sync = event => setClients(Array.isArray(event.detail) ? event.detail : getStoredClients());
+    window.addEventListener('csag:clients-updated', sync);
+    return () => window.removeEventListener('csag:clients-updated', sync);
+  }, [allowed, remote, fetchSupabaseClients]);
 
+  useEffect(() => {
+    if (remote) return;
     if (isFirebaseConfigured && db) {
       const unsubscribe = onSnapshot(collection(db, 'clients'), (snapshot) => {
         const data = snapshot.docs
@@ -280,10 +276,10 @@ export function useClients() {
 
     setClients(getStoredClients());
     setLoading(false);
-    return () => { isMounted = false; };
-  }, [fetchSupabaseClients]);
+  }, [remote]);
 
-  const createClient = async (clientData) => {
+  const createClient = async (clientData, { handoff = false } = {}) => {
+    if (!allowed || !clientData.name?.trim()) return null;
     const newClient = {
       ...clientData,
       id: clientData.id || `client-${Date.now()}`,
@@ -301,89 +297,81 @@ export function useClients() {
       created_at: new Date().toISOString()
     };
 
-    if (isSupabaseConfigured && supabase) {
+    if (remote) {
       try {
-        const safeInsert = buildSafeSupabasePayload(newClient);
-        const { data, error } = await supabase.from('clients').insert([safeInsert]).select().single();
-
-        if (!error && data?.id) {
-          newClient.id = data.id;
-        }
-      } catch (e) {
-        console.warn('Erro no Supabase ao criar cliente, mantendo persistência local:', e);
+        const values = buildSafeSupabasePayload(newClient);
+        if (clientData.id) values.id = clientData.id;
+        const table = supabase.from('clients');
+        const operation = handoff ? table.upsert(values, { ignoreDuplicates: true }) : table.insert(values);
+        const { data, error } = await operation.select('*').maybeSingle();
+        if (error) throw error;
+        const row = data || (handoff && clientData.id
+          ? (await supabase.from('clients').select('*').eq('id', clientData.id).single()).data : null);
+        if (!row) throw new Error('Cadastro não confirmado');
+        window.dispatchEvent(new Event('csag:remote-clients-changed'));
+        toast.success('Cliente cadastrado.');
+        return presentRemoteClient(row);
+      } catch {
+        toast.error('Não foi possível cadastrar o cliente. Confira os dados e tente novamente.');
+        return null;
       }
+    }
+
+    if (handoff) {
+      const existing = getStoredClients().find(client => client.id === newClient.id);
+      if (existing) return existing;
     } else if (isFirebaseConfigured && db) {
       try {
         const docRef = doc(collection(db, 'clients'));
         newClient.id = docRef.id;
         await setDoc(docRef, newClient);
-      } catch (e) {
-        console.warn('Erro no Firebase ao criar cliente, mantendo persistência local:', e);
+      } catch {
+        toast.error('Não foi possível cadastrar o cliente.');
+        return null;
       }
     }
 
     saveExtendedMetaForClient(newClient);
-    setClients(prev => {
-      const filtered = prev.filter(c => !areIdsMatching(c.id, newClient.id, c.name, newClient.name));
-      const next = [newClient, ...filtered];
-      broadcastClientsUpdate(next);
-      return next;
-    });
+    const next = [newClient, ...getStoredClients().filter(client =>
+      !areIdsMatching(client.id, newClient.id, client.name, newClient.name))];
+    setClients(next);
+    broadcastClientsUpdate(next);
     toast.success('Cliente cadastrado com sucesso!');
     return newClient;
   };
 
   const updateClient = async (updated) => {
-    saveExtendedMetaForClient(updated);
-
-    let targetIdForRemote = updated.id;
-    setClients(prev => {
-      const next = prev.map(c => {
-        if (areIdsMatching(c.id, updated.id, c.name, updated.name)) {
-          targetIdForRemote = c.id;
-          const merged = {
-            ...c,
-            ...updated,
-            id: c.id,
-            primary_color: updated.primary_color || updated.brand_color || c.primary_color || c.brand_color,
-            brand_color: updated.brand_color || updated.primary_color || c.brand_color
-          };
-          saveExtendedMetaForClient(merged);
-          return merged;
-        }
-        return c;
-      });
+    if (!allowed) return null;
+    try {
+      if (remote) {
+        const current = clients.find(client => client.id === updated.id);
+        if (!current) throw new Error('Cliente indisponível');
+        const { data, error } = await supabase.from('clients')
+          .update(buildSafeSupabasePayload({ ...updated, agency_metadata: current.agency_metadata }))
+          .eq('id', updated.id).select().single();
+        if (error || !data) throw error;
+        window.dispatchEvent(new Event('csag:remote-clients-changed'));
+        toast.success('Ficha do cliente atualizada.');
+        return presentRemoteClient(data);
+      }
+      if (isFirebaseConfigured && db) {
+        const { id, ...values } = updated;
+        await updateDoc(doc(db, 'clients', id), values);
+      }
+      saveExtendedMetaForClient(updated);
+      const next = clients.map(client => client.id === updated.id ? { ...client, ...updated } : client);
+      setClients(next);
       broadcastClientsUpdate(next);
-      return next;
-    });
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const safeUpdate = buildSafeSupabasePayload(updated);
-        if (Object.keys(safeUpdate).length > 0) {
-          await supabase.from('clients').update(safeUpdate).eq('id', targetIdForRemote);
-        }
-      } catch (e) {
-        console.warn('Erro ao atualizar colunas básicas no Supabase:', e);
-      }
-      toast.success('Ficha do cliente atualizada!');
-      return;
+      toast.success('Ficha do cliente atualizada.');
+      return updated;
+    } catch {
+      toast.error('A ficha não foi atualizada. Confira os dados e tente novamente.');
+      return null;
     }
-
-    if (isFirebaseConfigured && db) {
-      try {
-        const { id, ...data } = updated;
-        const docRef = doc(db, 'clients', id);
-        await updateDoc(docRef, data);
-      } catch (e) {
-        console.warn('Erro ao atualizar no Firebase:', e);
-      }
-    }
-    toast.success('Ficha do cliente atualizada!');
   };
 
   const totalMRR = clients.filter(c => c.status === 'active').reduce((sum, c) => sum + (Number(c.monthly_fee) || 0), 0);
 
-  return { clients, loading, createClient, updateClient, totalMRR, refetch: fetchSupabaseClients };
+  return { clients: allowed ? clients : [], loading: allowed && loading, error, createClient, updateClient, totalMRR, refetch: fetchSupabaseClients };
 }
 

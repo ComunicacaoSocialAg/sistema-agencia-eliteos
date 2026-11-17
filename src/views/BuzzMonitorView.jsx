@@ -4,6 +4,8 @@ import {
   Clock, Share2, AlertCircle, FileText, ExternalLink, Trash2, 
   Edit3, ShieldCheck, ChevronRight, BarChart2, Save, X
 } from 'lucide-react';
+import ApprovalFlow from '../components/ApprovalFlow';
+import { useAllDeliverables } from '../hooks/useDeliverables';
 import { useSocialManagement } from '../hooks/useSocialManagement';
 import { useActiveClient } from '../contexts/ActiveClientContext';
 import { generateContent } from '../lib/gemini';
@@ -15,13 +17,28 @@ const STATUS_CONFIG = {
   roteiro: { label: 'Roteiro Escrito', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
   producao: { label: 'Em Produção', color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
   aprovacao: { label: 'Aguardando Cliente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-  agendado: { label: 'Aprovado / Agendado', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  agendado: { label: 'Agendado', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   publicado: { label: 'Publicado', color: 'bg-green-500/20 text-green-300 border-green-500/40' }
 };
 
 export default function BuzzMonitorView() {
   const { selectedClient, isAllClients, selectedClientId, setSelectedClientId, clients } = useActiveClient();
-  const { posts, loading, createPost, updatePostStatus, deletePost, saveMonthlyMetric, metrics } = useSocialManagement();
+  const { posts, loading, error, refreshData, createPost, prepareApproval, updatePostStatus, deletePost, saveMonthlyMetric, metrics } = useSocialManagement();
+
+  const { deliverables } = useAllDeliverables();
+  const [approvalTask, setApprovalTask] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function openApproval(post) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const taskId = await prepareApproval(post);
+      if (taskId) setApprovalTask({ id: taskId, title: post.title });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const [activeTab, setActiveTab] = useState('grade'); // 'grade' | 'canais' | 'fechamento'
   const [statusFilter, setStatusFilter] = useState('todos');
@@ -46,7 +63,7 @@ export default function BuzzMonitorView() {
   // Form de fechamento mensal
   const [metricForm, setMetricForm] = useState({
     client_id: selectedClient?.id || clients[0]?.id || '',
-    period_month: '2026-10',
+    period_month: new Date().toISOString().slice(0, 7),
     followers_total: '',
     followers_growth: '',
     reach_organic: '',
@@ -55,7 +72,12 @@ export default function BuzzMonitorView() {
     notes: ''
   });
 
-  const isMedicalClient = selectedClient?.document_id?.includes('CRM') || selectedClient?.name?.includes('Dr.');
+  const draftClient = isAllClients ? clients.find(item => item.id === newPost.client_id) : selectedClient;
+  const isMedicalClient = /CRM|RQE/i.test(draftClient?.document_id || '');
+  const instagram = selectedClient?.social_media_config?.instagram_handle || selectedClient?.reportei_config?.instagram_handle;
+  const instagramHandle = /^@?[a-z0-9._]+$/i.test(instagram || '') ? instagram.replace(/^@/, '') : '';
+  const facebookValue = selectedClient?.social_media_config?.facebook_url || '';
+  const facebookUrl = /^https:\/\/(?:www\.)?facebook\.com\/[a-z0-9._/-]+$/i.test(facebookValue) ? facebookValue : '';
 
   const filteredPosts = posts.filter(p => {
     if (statusFilter === 'todos') return true;
@@ -69,12 +91,12 @@ export default function BuzzMonitorView() {
       return;
     }
 
-    await createPost({
+    const saved = await createPost({
       ...newPost,
-      client_id: isAllClients ? (newPost.client_id || clients[0]?.id) : (selectedClient?.id || clients[0]?.id),
-      medical_compliance_checked: isMedicalClient ? true : newPost.medical_compliance_checked
+      client_id: isAllClients ? newPost.client_id : selectedClient?.id
     });
 
+    if (!saved) return;
     setShowNewModal(false);
     setNewPost({
       title: '',
@@ -92,15 +114,15 @@ export default function BuzzMonitorView() {
 
   const handleSaveMetric = async (e) => {
     e.preventDefault();
-    await saveMonthlyMetric({
+    const saved = await saveMonthlyMetric({
       ...metricForm,
-      client_id: isAllClients ? (metricForm.client_id || clients[0]?.id) : (selectedClient?.id || clients[0]?.id),
+      client_id: isAllClients ? metricForm.client_id : selectedClient?.id,
       followers_total: Number(metricForm.followers_total) || 0,
       followers_growth: Number(metricForm.followers_growth) || 0,
       reach_organic: Number(metricForm.reach_organic) || 0,
       total_interactions: Number(metricForm.total_interactions) || 0
     });
-    setShowMetricModal(false);
+    if (saved) setShowMetricModal(false);
   };
 
   const handleGenerateScriptWithAi = async () => {
@@ -112,9 +134,9 @@ export default function BuzzMonitorView() {
     const toastId = toast.loading('Gerando roteiro com IA adaptado ao cliente...');
     try {
       const prompt = `Você é o estrategista de conteúdo da agência CS Ag.
-Cliente: ${selectedClient?.name || 'Cliente da Agência'}.
-Tom de voz: ${selectedClient?.tone_of_voice || 'Profissional e acolhedor'}.
-${isMedicalClient ? 'REGRA OBRIGATÓRIA: Médico vascular Dr. Alberto Brasil CRM-MG 39529 RQE 15412. Sem promessa de cura, sem sensacionalismo, tom estritamente educativo conforme Resolução CFM 2.336/2023.' : ''}
+Cliente: ${draftClient?.name || 'Cliente da agência'}.
+Tom de voz: ${draftClient?.tone_of_voice || 'Tom de voz ainda não cadastrado'}.
+${isMedicalClient ? 'Rascunho informativo sujeito a revisão do responsável. Não invente especialidade, inscrição, fontes nem afirmações clínicas.' : ''}
 Tema da pauta: ${newPost.title}.
 Formato: ${newPost.format}.
 Canal: ${newPost.channel}.
@@ -124,7 +146,7 @@ Crie:
 2. Legenda Completa com chamada para ação sóbria.
 Seja direto e prático.`;
 
-      const aiText = await generateContent(prompt);
+      const aiText = await generateContent(prompt, 'auto', { requireProvider: true });
       if (aiText) {
         setNewPost(prev => ({
           ...prev,
@@ -142,6 +164,21 @@ Seja direto e prático.`;
 
   return (
     <div className="h-full flex flex-col bg-cs-bg text-cs-text-primary overflow-hidden">
+      {error && <p role="alert" className="text-sm text-red-300">
+        {error} <button type="button" onClick={refreshData} className="underline">Tentar novamente</button>
+      </p>}
+      {approvalTask && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="social-approval-title"
+            className="w-full max-w-2xl max-h-[90vh] space-y-4 overflow-auto rounded-xl border border-cs-border bg-cs-surface p-5">
+            <div className="flex items-start justify-between gap-3">
+              <h2 id="social-approval-title" className="font-semibold text-white">{approvalTask.title}</h2>
+              <button type="button" className="text-sm text-cs-text-secondary underline" onClick={() => setApprovalTask(null)}>Fechar</button>
+            </div>
+            <ApprovalFlow taskId={approvalTask.id} />
+          </section>
+        </div>
+      )}
       {/* Top Header */}
       <header className="bg-cs-surface border-b border-cs-border px-6 py-4 shrink-0">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -204,17 +241,8 @@ Seja direto e prático.`;
           </div>
         </div>
 
-        {/* Alerta de Compliance Médico se o Dr. Alberto estiver ativo */}
         {isMedicalClient && (
-          <div className="mt-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-blue-300">
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={16} className="text-blue-400 shrink-0" />
-              <span>
-                <strong>Diretriz CFM 2.336/2023:</strong> Todas as postagens para Dr. Alberto Brasil exigem identificação de CRM-MG 39529 e RQE 15412, com caráter estritamente educativo.
-              </span>
-            </div>
-            <span className="text-[10px] bg-blue-500/20 px-2 py-0.5 rounded font-mono font-bold">RQE 15412</span>
-          </div>
+          <p className="mt-3 text-xs text-blue-300">O material de saúde precisa da revisão do profissional responsável antes da publicação.</p>
         )}
       </header>
 
@@ -315,6 +343,11 @@ Seja direto e prático.`;
                         )}
                       </div>
 
+                      {post.task_id && (() => {
+                        const version = deliverables.find(item => item.task_id === post.task_id);
+                        const label = { pendente: 'Aguardando aprovação', aprovado: 'Versão aprovada', reprovado: 'Ajustes solicitados', com_ressalvas: 'Ajustes solicitados' }[version?.status];
+                        return label && <p className="text-xs text-cs-text-secondary">{label}</p>;
+                      })()}
                       {/* Footer com Ações */}
                       <div className="pt-3 border-t border-cs-border/60 flex items-center justify-between mt-3">
                         <select
@@ -325,12 +358,14 @@ Seja direto e prático.`;
                           <option value="pauta">Pauta</option>
                           <option value="roteiro">Roteiro</option>
                           <option value="producao">Produção</option>
-                          <option value="aprovacao">Aguard. Cliente</option>
+                          {post.status === 'aprovacao' && <option value="aprovacao">Aguard. Cliente</option>}
                           <option value="agendado">Agendado</option>
                           <option value="publicado">Publicado</option>
                         </select>
 
                         <div className="flex items-center gap-1.5">
+                          <button type="button" disabled={busy} onClick={() => openApproval(post)}
+                            className="text-xs text-cs-primary underline">Aprovação</button>
                           {post.post_url && (
                             <a
                               href={post.post_url}
@@ -368,51 +403,20 @@ Seja direto e prático.`;
                 Acessos e identificadores das redes sociais para a gestão da agência.
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-cs-bg border border-cs-border rounded-xl p-4 flex items-start justify-between">
-                  <div>
-                    <span className="text-[10px] text-pink-400 font-bold uppercase tracking-wider block mb-1">Instagram Principal</span>
-                    <h3 className="text-sm font-bold text-white mb-1">
-                      {selectedClient?.name?.includes('Alberto') ? '@dralbertobr' : '@dubola_molhos'}
-                    </h3>
-                    <p className="text-xs text-cs-text-secondary">
-                      {selectedClient?.name?.includes('Alberto') ? 'Perfil Profissional Médico (Saúde Vascular)' : 'Linha de Molhos Artesanais e Empórios'}
-                    </p>
-                  </div>
-                  <a
-                    href={selectedClient?.name?.includes('Alberto') ? 'https://instagram.com/dralbertobr' : 'https://instagram.com/dubola_molhos'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-2 bg-cs-surface text-cs-text-secondary hover:text-white rounded-lg border border-cs-border transition-colors"
-                  >
-                    <ExternalLink size={16} />
-                  </a>
-                </div>
-
-                <div className="bg-cs-bg border border-cs-border rounded-xl p-4 flex items-start justify-between">
-                  <div>
-                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider block mb-1">Página Facebook</span>
-                    <h3 className="text-sm font-bold text-white mb-1">
-                      {selectedClient?.name?.includes('Alberto') ? 'Dr. Alberto Brasil: Cirurgião Vascular' : 'Dubola Molhos Nobres'}
-                    </h3>
-                    <p className="text-xs text-cs-text-secondary">Página integrada ao Meta Business Suite da Agência</p>
-                  </div>
-                  <a
-                    href="https://facebook.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-2 bg-cs-surface text-cs-text-secondary hover:text-white rounded-lg border border-cs-border transition-colors"
-                  >
-                    <ExternalLink size={16} />
-                  </a>
-                </div>
-              </div>
+              {!selectedClient ? <p className="text-sm text-cs-text-secondary">Selecione um cliente para consultar os canais cadastrados.</p>
+                : <div className="flex flex-wrap gap-4 text-sm">
+                  {instagramHandle && <a className="text-cs-primary underline" href={'https://www.instagram.com/' + instagramHandle}
+                    target="_blank" rel="noreferrer">Instagram @{instagramHandle}</a>}
+                  {facebookUrl && <a className="text-cs-primary underline" href={facebookUrl}
+                    target="_blank" rel="noreferrer">Abrir página no Facebook</a>}
+                  {!instagramHandle && !facebookUrl && <p className="text-cs-text-secondary">A ficha deste cliente ainda não tem canais cadastrados.</p>}
+                </div>}
             </div>
 
             <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
               <h3 className="text-sm font-bold text-white mb-3">Diretrizes de Tom de Voz & Comunicação</h3>
               <p className="text-xs text-cs-text-secondary leading-relaxed bg-cs-bg p-4 rounded-xl border border-cs-border">
-                {selectedClient?.tone_of_voice || 'Tom de voz focado em autoridade, clareza e conexão com o público de Poços de Caldas e região.'}
+                {selectedClient?.tone_of_voice || 'Preencha o tom de voz na ficha do cliente.'}
               </p>
             </div>
           </div>
@@ -491,6 +495,14 @@ Seja direto e prático.`;
             </p>
 
             <form onSubmit={handleCreatePost} className="space-y-4">
+              {isAllClients && <label className="block text-xs text-white">
+                Cliente
+                <select value={newPost.client_id} onChange={event => setNewPost(current => ({ ...current, client_id: event.target.value }))} required
+                  className="mt-1 w-full rounded-lg border border-cs-border bg-cs-bg p-2">
+                  <option value="">Selecione um cliente</option>
+                  {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </label>}
               <div>
                 <label className="text-xs font-semibold text-white mb-1 block">Tema da Pauta / Título do Post</label>
                 <div className="flex gap-2">
@@ -613,6 +625,14 @@ Seja direto e prático.`;
             </p>
 
             <form onSubmit={handleSaveMetric} className="space-y-3.5">
+              {isAllClients && <label className="block text-xs text-white">
+                Cliente
+                <select value={metricForm.client_id} onChange={event => setMetricForm(current => ({ ...current, client_id: event.target.value }))} required
+                  className="mt-1 w-full rounded-lg border border-cs-border bg-cs-bg p-2">
+                  <option value="">Selecione um cliente</option>
+                  {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </label>}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-white mb-1 block">Mês de Referência</label>

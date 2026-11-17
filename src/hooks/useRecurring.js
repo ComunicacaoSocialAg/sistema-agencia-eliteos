@@ -1,67 +1,58 @@
 import { useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { addDays, addMonths, addWeeks, format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { operationId } from '../lib/operationId';
+import { useTasks } from './useTasks';
 
 export function useRecurring() {
+  const { user, profile, isDemoMode } = useAuth();
+  const { refresh } = useTasks();
+  const canGenerate = isSupabaseConfigured && !isDemoMode && user?.id === profile?.id
+    && ['admin', 'commercial', 'production'].includes(profile?.role) && !user?.id?.startsWith('demo-');
+
   const checkAndGenerate = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
-
+    if (!canGenerate) return;
+    const today = new Date();
     try {
-      // 1. Fetch recurring tasks due today or earlier
-      const today = new Date().toISOString().split('T')[0];
-      const { data: recurring, error: fetchError } = await supabase
-        .from('recurring_tasks')
-        .select('*')
-        .eq('is_active', true)
-        .lte('next_generation_date', today);
+      const { data: rules, error } = await supabase.from('recurring_tasks').select('*')
+        .eq('is_active', true).lte('next_generation_date', format(today, 'yyyy-MM-dd'));
+      if (error) throw error;
 
-      if (fetchError) throw fetchError;
-      if (!recurring || recurring.length === 0) return;
+      let advanced = 0;
+      let taskSaved = false;
+      for (const rule of rules || []) {
+        const date = parseISO(rule.next_generation_date);
+        const step = Number.isInteger(rule.interval) && rule.interval > 0 ? rule.interval : 1;
+        const next = rule.frequency === 'monthly' ? addMonths(date, step) : addWeeks(date, step);
+        if (!['monthly', 'weekly'].includes(rule.frequency) || Number.isNaN(next.getTime())) continue;
 
-      console.log(`[Recurring] Encontradas ${recurring.length} tarefas para gerar.`);
-
-      for (const item of recurring) {
-        // 2. Create the task
-        const { error: insertError } = await supabase
-          .from('tasks')
-          .insert({
-            title: item.title,
-            notes: item.notes,
-            tag: item.tag,
-            client_id: item.client_id,
-            assigned_to_id: item.assigned_to_id,
-            estimated_hours: item.estimated_hours,
-            status: 'backlog',
-            deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // Default 7 days deadline
-          });
-
+        const id = await operationId(`recorrencia-${rule.id}-${rule.next_generation_date}`, true);
+        const { error: insertError } = await supabase.from('tasks').upsert({
+          id, title: rule.title, notes: rule.notes, tag: rule.tag, client_id: rule.client_id,
+          assigned_to_id: rule.assigned_to_id, estimated_hours: rule.estimated_hours,
+          status: 'backlog', deadline: format(addDays(today, 7), 'yyyy-MM-dd'),
+        }, { ignoreDuplicates: true });
         if (insertError) throw insertError;
+        taskSaved = true;
 
-        // 3. Calculate next generation date
-        let nextDate = new Date(item.next_generation_date);
-        if (item.frequency === 'monthly') {
-          nextDate.setMonth(nextDate.getMonth() + (item.interval || 1));
-        } else if (item.frequency === 'weekly') {
-          nextDate.setDate(nextDate.getDate() + 7 * (item.interval || 1));
+        const { data: updated, error: updateError } = await supabase.from('recurring_tasks')
+          .update({ next_generation_date: format(next, 'yyyy-MM-dd') })
+          .eq('id', rule.id).eq('next_generation_date', rule.next_generation_date).select('id').maybeSingle();
+        if (updateError) {
+          await refresh?.();
+          throw updateError;
         }
-
-        // 4. Update the recurring item
-        await supabase
-          .from('recurring_tasks')
-          .update({
-            last_generated_at: new Date().toISOString(),
-            next_generation_date: nextDate.toISOString().split('T')[0]
-          })
-          .eq('id', item.id);
+        if (updated) advanced++;
       }
 
-      if (recurring.length > 0) {
-        toast.success(`${recurring.length} tarefas recorrentes geradas com sucesso!`);
-      }
-    } catch (err) {
-      console.error('[Recurring Error]', err);
+      if (taskSaved) await refresh?.();
+      if (advanced) toast.success(advanced === 1 ? 'Uma tarefa recorrente gerada.' : `${advanced} tarefas recorrentes geradas.`);
+    } catch {
+      toast.error('Não foi possível atualizar as recorrências. Elas serão conferidas ao reabrir o sistema.');
     }
-  }, []);
+  }, [canGenerate, refresh]);
 
   return { checkAndGenerate };
 }

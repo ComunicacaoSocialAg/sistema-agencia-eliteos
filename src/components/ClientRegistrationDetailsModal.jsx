@@ -94,10 +94,8 @@ Observações: ${registration.observations || 'Nenhuma'}`;
     if (!onCreateClient) return;
     setConverting(true);
     try {
-      await onCreateClient(registration);
-      if (onUpdateStatus) {
-        await onUpdateStatus(registration.id, 'convertido');
-      }
+      if (!await onCreateClient(registration)) return;
+      if (onUpdateStatus && !await onUpdateStatus(registration.id, 'convertido')) return;
       toast.success('Cliente oficial criado e cadastrado com sucesso!');
       onClose();
     } catch (err) {
@@ -301,10 +299,9 @@ Observações: ${registration.observations || 'Nenhuma'}`;
 
             {onDelete && (
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (confirm('Deseja excluir esta ficha cadastral?')) {
-                    onDelete(registration.id);
-                    onClose();
+                    if (await onDelete(registration.id)) onClose();
                   }
                 }}
                 className="text-red-400 hover:text-red-300 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors"

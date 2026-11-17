@@ -1,3 +1,4 @@
+import { copyApprovalUrl, useAllDeliverables } from '../hooks/useDeliverables';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Play, Pause, Clock, CheckCircle2, MessageSquare, Plus, 
@@ -6,9 +7,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, parseISO, isSameDay, isToday, isPast, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { useTasks } from '../hooks/useTasks';
-import { useClients } from '../hooks/useClients';
+import { areIdsMatching, useClients } from '../hooks/useClients';
 import { useAuth } from '../contexts/AuthContext';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useGoogleSync } from '../hooks/useGoogleSync';
@@ -16,6 +17,7 @@ import { useActiveClient } from '../contexts/ActiveClientContext';
 import TaskModal from '../components/TaskModal';
 import NewTaskModal from '../components/NewTaskModal';
 import { cn } from '../utils/cn';
+import { operationId } from '../lib/operationId';
 
 // --- CONSTANTS ---
 const COLUMNS = [
@@ -58,19 +60,22 @@ function safeParseISO(dateStr) {
 }
 
 // --- TASK CARD ---
-function TaskCard({ task, onTaskClick, onUpdate }) {
+function TaskCard({ task, onTaskClick, onUpdate, canShareApproval }) {
   const checklist = task.checklist || [];
   const comments = task.comments || [];
   const clientName = task.client_name || task.client?.name || 'Cliente';
   const assignedTo = task.assigned_to || 'Bruno';
 
-  const handleCopyApprovalLink = (e) => {
-    e.stopPropagation();
-    const link = `${window.location.origin}/aprovar/${task.id}`;
-    navigator.clipboard.writeText(link);
-    toast.success('Link de aprovação copiado!');
+  const handleCopyApprovalLink = async (event) => {
+    event.stopPropagation();
+    try {
+      await copyApprovalUrl(task.id);
+      toast.success('Link de aprovação copiado.');
+    } catch {
+      toast.error('Não foi possível copiar. Abra a tarefa para consultar o link.');
+    }
   };
-  
+
   return (
     <div 
       className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 p-5 rounded-2xl shadow-sm hover:shadow-xl group transition-all duration-200 cursor-pointer active:scale-[0.99] relative"
@@ -80,13 +85,13 @@ function TaskCard({ task, onTaskClick, onUpdate }) {
         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cs-bg text-cs-text-secondary border border-cs-border uppercase tracking-wider truncate max-w-[150px]">
           {clientName}
         </span>
-        <button 
+        {canShareApproval && <button
           onClick={handleCopyApprovalLink}
           className="text-cs-text-secondary hover:text-cs-primary p-1 transition-colors"
           title="Copiar Link de Aprovação do Cliente"
         >
           <Copy size={12} />
-        </button>
+        </button>}
       </div>
 
       <h4 className="font-bold text-white mb-3 text-sm leading-snug tracking-tight">{task.title || 'Sem título'}</h4>
@@ -102,6 +107,7 @@ function TaskCard({ task, onTaskClick, onUpdate }) {
         <div className="flex items-center gap-1">
           <Calendar size={12} className="text-cs-primary/70" />
           <span className="text-[10px]">
+            {task.browserOnly && <span>Local · </span>}
             {task.deadline && safeParseISO(task.deadline)
               ? format(safeParseISO(task.deadline), "dd MMM", { locale: ptBR }) 
               : 'S/ prazo'}
@@ -154,7 +160,7 @@ function TaskCard({ task, onTaskClick, onUpdate }) {
 }
 
 // --- KANBAN VIEW ---
-function KanbanView({ tasks = [], onTaskClick, onUpdate }) {
+function KanbanView({ tasks = [], onTaskClick, onUpdate, shareableTaskIds }) {
   return (
     <div className="h-full overflow-x-auto overflow-y-hidden flex items-start gap-4 p-6 custom-scrollbar">
       {COLUMNS.map(column => {
@@ -179,7 +185,7 @@ function KanbanView({ tasks = [], onTaskClick, onUpdate }) {
             {/* Column Cards Feed */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
               {colTasks.map(task => (
-                <TaskCard 
+                <TaskCard canShareApproval={shareableTaskIds.has(task.id)}
                   key={task.id} 
                   task={task} 
                   onTaskClick={onTaskClick} 
@@ -280,7 +286,9 @@ function CalendarView({ tasks = [], onTaskClick }) {
 
 // --- MAIN COMPONENT ---
 export default function ProductionView() {
-  const { tasks = [], updateTask: saveTask, addComment, toggleChecklist, createTask, applyTemplate } = useTasks();
+  const { tasks = [], updateTask: saveTask, addComment, toggleChecklist, createTask, applyTemplate, error, refresh, remoteMode } = useTasks(null, { showArchived: true });
+  const { deliverables } = useAllDeliverables();
+  const shareableTaskIds = new Set(deliverables.map(version => version.task_id));
   const { clients = [] } = useClients();
   const { profile } = useAuth();
   const { setContext } = useAIAssistant();
@@ -298,19 +306,19 @@ export default function ProductionView() {
 
   // Manter sincronizado quando mudar no header
   useEffect(() => {
-    if (selectedClientId !== 'all') {
-      setFilterClient(selectedClientId);
-    }
+    setFilterClient(selectedClientId === 'all' ? 'todos' : selectedClientId);
   }, [selectedClientId]);
 
   // Sync remote tasks to local (add is_tracking client-side)
   useEffect(() => {
     const tasksArray = Array.isArray(tasks) ? tasks : [];
-    setLocalTasks(tasksArray.map(t => ({ 
-      ...t, 
-      isTracking: !!t.is_tracking, 
-      trackedSeconds: Number(t.tracked_seconds) || 0 
-    })));
+    setLocalTasks(previous => tasksArray.map(task => {
+      const running = previous.find(item => item.id === task.id && item.isTracking);
+      return {
+        ...task, isTracking: Boolean(running || task.is_tracking),
+        trackedSeconds: running?.trackedSeconds ?? (Number(task.tracked_seconds) || 0),
+      };
+    }));
   }, [tasks]);
 
   // Global tick for all tracking tasks
@@ -326,19 +334,52 @@ export default function ProductionView() {
     return () => clearInterval(timerRef.current);
   }, []);
 
-  const handleUpdate = (updatedTask) => {
-    setLocalTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
-    if (selectedTask?.id === updatedTask.id) setSelectedTask(updatedTask);
-    if (!updatedTask.isTracking) {
-      saveTask({ ...updatedTask, tracked_seconds: updatedTask.trackedSeconds });
+  const handleUpdate = async (updatedTask) => {
+    const current = localTasks.find(task => task.id === updatedTask.id);
+    if (updatedTask.isTracking && current && !current.isTracking) {
+      setLocalTasks(prev => prev.map(task => task.id === updatedTask.id ? updatedTask : task));
+      return updatedTask;
     }
+
+    const changes = Object.fromEntries(Object.entries(updatedTask)
+      .filter(([key, value]) => key !== 'id' && key !== 'isTracking' && key !== 'trackedSeconds'
+        && JSON.stringify(value) !== JSON.stringify(current?.[key])));
+    if (current?.isTracking && !updatedTask.isTracking) changes.tracked_seconds = updatedTask.trackedSeconds;
+    const saved = await saveTask({ id: updatedTask.id, ...changes });
+    if (saved && current?.isTracking && !updatedTask.isTracking) {
+      setLocalTasks(prev => prev.map(task => task.id === updatedTask.id ? {
+        ...task, isTracking: false, trackedSeconds: updatedTask.trackedSeconds,
+      } : task));
+    }
+    return saved;
+  };
+
+  const scheduleFollowUp = async (task, deadline) => {
+    const client = clients.find(item =>
+      areIdsMatching(item.id, task.client_id, item.name, task.client_name));
+    if (!client) {
+      toast.error('Vincule a tarefa a um cliente antes de marcar o acompanhamento.');
+      return null;
+    }
+
+    return createTask({
+      id: await operationId(`acompanhamento-${task.id}-${deadline}`, remoteMode),
+      title: `Acompanhar: ${task.title}`,
+      client_id: client.id,
+      client_name: client.name,
+      deadline,
+      status: 'backlog',
+      tag: task.tag,
+      notes: `Acompanhamento da entrega “${task.title}”.`,
+      external_links: (task.external_links || []).filter(link => link?.kind === 'delivery'),
+    });
   };
 
   const filteredTasks = useMemo(() => {
     return localTasks.filter(t => {
-      const matchClient = filterClient === 'todos' 
-        ? (selectedClientId === 'all' || matchesSelectedClient(t.client_id))
-        : (t.client_id === filterClient || matchesSelectedClient(t.client_id) || (t.client && t.client.name === filterClient));
+      const matchClient = filterClient === 'todos'
+        ? matchesSelectedClient(t.client_id, t.client_name)
+        : areIdsMatching(t.client_id, filterClient, t.client_name || t.client?.name, '');
       const matchTag = filterTag === 'todos' || t.tag === filterTag;
       return matchClient && matchTag;
     });
@@ -425,10 +466,16 @@ export default function ProductionView() {
         </div>
       </div>
 
+      {error && (
+        <p role="alert" className="px-6 py-2 text-sm text-amber-300">
+          Falha ao carregar tarefas. <button type="button" className="underline" onClick={refresh}>Tentar novamente</button>
+        </p>
+      )}
+
       {/* View Content */}
       <div className="flex-1 overflow-hidden">
         {viewMode === 'kanban'
-          ? <KanbanView tasks={filteredTasks} onTaskClick={setSelectedTask} onUpdate={handleUpdate} />
+          ? <KanbanView shareableTaskIds={shareableTaskIds} tasks={filteredTasks} onTaskClick={setSelectedTask} onUpdate={handleUpdate} />
           : <CalendarView tasks={filteredTasks} onTaskClick={setSelectedTask} />
         }
       </div>
@@ -437,10 +484,12 @@ export default function ProductionView() {
       {selectedTask && (
         <TaskModal
           task={localTasks.find(t => t.id === selectedTask.id) || selectedTask}
+          key={selectedTask.id}
           onClose={() => setSelectedTask(null)}
           onUpdate={handleUpdate}
           onAddComment={addComment}
           onToggleChecklist={toggleChecklist}
+          onScheduleFollowUp={scheduleFollowUp}
           columns={COLUMNS}
           user={profile}
         />

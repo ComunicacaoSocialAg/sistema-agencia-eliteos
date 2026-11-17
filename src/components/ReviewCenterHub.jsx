@@ -4,23 +4,19 @@ import {
   Clock, 
   AlertCircle, 
   Copy, 
-  ExternalLink, 
-  Plus, 
   Filter, 
   Search, 
   FileUp, 
   MessageSquare, 
   Sparkles,
-  Download,
   Eye,
-  Check,
   X,
   FolderOpen,
   ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useDeliverables, useAllDeliverables } from '../hooks/useDeliverables';
-import { useClients, areIdsMatching } from '../hooks/useClients';
+import { copyApprovalUrl, useAllDeliverables } from '../hooks/useDeliverables';
+import { useClients } from '../hooks/useClients';
 import { useTasks } from '../hooks/useTasks';
 import { cn } from '../utils/cn';
 import ApprovalFlow from './ApprovalFlow';
@@ -28,7 +24,7 @@ import ApprovalFlow from './ApprovalFlow';
 export default function ReviewCenterHub({ onOpenClientWorkspace }) {
   const { clients } = useClients();
   const { tasks, allTasks } = useTasks();
-  const { deliverables, loading, updateDeliverableStatus, addDeliverable } = useAllDeliverables();
+  const { deliverables, loading, error, refresh } = useAllDeliverables();
 
   const [filterClient, setFilterClient] = useState('todos');
   const [filterStatus, setFilterStatus] = useState('todos');
@@ -41,45 +37,17 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
   // Form novo entregável
   const [uploadClientId, setUploadClientId] = useState('');
   const [uploadTaskId, setUploadTaskId] = useState('');
-  const [uploadFileType, setUploadFileType] = useState('link'); // 'link' | 'file'
-  const [uploadUrl, setUploadUrl] = useState('');
-  const [uploadFileName, setUploadFileName] = useState('');
-
   const combinedTasks = allTasks || tasks || [];
 
-  // Mapear cada entregável com sua respectiva tarefa e cliente
   const mappedDeliverables = useMemo(() => {
-    return deliverables.map(deliv => {
-      const isDubolaHint = (deliv.file_name || '').toLowerCase().includes('dubola') || 
-                           (deliv.file_name || '').toLowerCase().includes('habanero') || 
-                           (deliv.file_name || '').toLowerCase().includes('rótulo') || 
-                           (deliv.file_name || '').toLowerCase().includes('molho');
-      const isAlbertoHint = (deliv.file_name || '').toLowerCase().includes('alberto') || 
-                            (deliv.file_name || '').toLowerCase().includes('varizes') || 
-                            (deliv.file_name || '').toLowerCase().includes('laser');
-
-      const task = combinedTasks.find(t => t.id === deliv.task_id) || {
-        id: deliv.task_id,
-        title: deliv.file_name || 'Demanda sem título',
-        client_id: isDubolaHint ? 'client-dubola' : (isAlbertoHint ? 'client-alberto-brasil' : (deliv.client_id || 'client-alberto-brasil')),
-        client_name: isDubolaHint ? 'Dubola Molhos Especiais' : (isAlbertoHint ? 'Dr. Alberto Brasil (Cirurgia Vascular)' : (deliv.client_name || 'Dr. Alberto Brasil (Cirurgia Vascular)'))
-      };
-
-      const targetClientId = deliv.client_id || task.client_id;
-      const targetClientName = deliv.client_name || task.client_name || task.client?.name;
-
-      const client = clients.find(c => areIdsMatching(c.id, targetClientId, c.name, targetClientName)) || {
-        id: targetClientId || 'demo-client',
-        name: targetClientName || 'Cliente Geral',
-        brand_color: '#3b82f6'
-      };
-
-      return {
-        ...deliv,
-        task,
-        client
-      };
-    });
+    const latest = new Map();
+    for (const version of deliverables) {
+      const task = combinedTasks.find(item => item.id === version.task_id);
+      if (!task || latest.has(task.id)) continue;
+      const client = clients.find(item => item.id === task.client_id);
+      latest.set(task.id, { ...version, task, client });
+    }
+    return [...latest.values()];
   }, [deliverables, combinedTasks, clients]);
 
   // Filtragem
@@ -107,42 +75,25 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
   const approvedCount = mappedDeliverables.filter(d => d.status === 'aprovado').length;
   const totalCount = mappedDeliverables.length;
 
-  const handleCopyLink = (taskId, e) => {
-    if (e) e.stopPropagation();
-    const link = `${window.location.origin}/aprovar/${taskId}`;
-    navigator.clipboard.writeText(link);
-    toast.success('🔗 Link mágico de aprovação copiado! Envie para o WhatsApp do cliente.');
+  const handleCopyLink = async (taskId) => {
+    try {
+      await copyApprovalUrl(taskId);
+      toast.success('Link de aprovação copiado.');
+    } catch {
+      toast.error('Não foi possível copiar. Abra as versões para consultar o link.');
+    }
   };
 
-  const handleSaveUpload = async (e) => {
-    e.preventDefault();
-    if (!uploadTaskId) {
-      toast.error('Selecione a tarefa / demanda correspondente.');
-      return;
-    }
-    if (!uploadUrl.trim()) {
-      toast.error('Informe o link do arquivo ou prévia.');
-      return;
-    }
-
-    await addDeliverable({
-      taskId: uploadTaskId,
-      fileOrUrl: uploadUrl,
-      fileName: uploadFileName.trim() || 'Entregável v1',
-      versionNumber: 1
-    });
-
+  const handleSelectTask = (event) => {
+    event.preventDefault();
+    if (!uploadTaskId) return;
+    setSelectedReviewTaskId(uploadTaskId);
     setShowUploadModal(false);
-    setUploadUrl('');
-    setUploadFileName('');
     setUploadTaskId('');
     setUploadClientId('');
   };
 
-  const tasksForSelectedClient = useMemo(() => {
-    if (!uploadClientId) return combinedTasks;
-    return combinedTasks.filter(t => t.client_id === uploadClientId || t.client_name === uploadClientId || t.client?.name === uploadClientId);
-  }, [combinedTasks, uploadClientId]);
+  const tasksForSelectedClient = combinedTasks.filter(task => task.client_id === uploadClientId && !task.browserOnly);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -273,7 +224,6 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
       {/* Deliverables Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredDeliverables.map(deliv => {
-          const isPending = deliv.status === 'pendente';
           const isApproved = deliv.status === 'aprovado';
           const isAdjust = deliv.status === 'ajustes' || deliv.status === 'reprovado' || deliv.status === 'com_ressalvas';
 
@@ -284,7 +234,7 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
             >
               {/* Preview Thumbnail */}
               <div className="aspect-video bg-cs-bg relative overflow-hidden flex items-center justify-center">
-                {deliv.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i) || deliv.file_url?.includes('unsplash') ? (
+                {deliv.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                   <img 
                     src={deliv.file_url} 
                     alt={deliv.file_name} 
@@ -354,44 +304,22 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
                     <button
                       onClick={() => handleCopyLink(deliv.task?.id || deliv.task_id)}
                       className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary/50 text-white hover:text-cs-primary py-2 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5"
-                      title="Copiar link público para o cliente aprovar no WhatsApp"
+                      title="Copiar link de aprovação"
                     >
-                      <Copy size={12} /> Link Mágico
+                      <Copy size={12} /> Copiar link
                     </button>
 
                     <button
                       onClick={() => setSelectedReviewTaskId(deliv.task?.id || deliv.task_id)}
                       className="w-full bg-cs-primary/10 border border-cs-primary/30 hover:bg-cs-primary/20 text-cs-primary py-2 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5"
                     >
-                      <Eye size={12} /> Revisar
+                      <Eye size={12} /> Ver versões
                     </button>
                   </div>
 
                   {/* Quick Decision / Hub Jump */}
                   <div className="flex items-center justify-between pt-1 text-[10px]">
-                    {isPending && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateDeliverableStatus(deliv.id, deliv.task?.id || deliv.task_id, 'aprovado')}
-                          className="text-green-400 hover:text-green-300 font-bold flex items-center gap-1 cursor-pointer"
-                          title="Aprovação rápida direta da agência"
-                        >
-                          <Check size={12} /> Aprovar
-                        </button>
-                        <span className="text-cs-border">|</span>
-                        <button
-                          onClick={() => {
-                            const note = prompt('Qual o motivo do ajuste?');
-                            if (note) updateDeliverableStatus(deliv.id, deliv.task?.id || deliv.task_id, 'ajustes', note);
-                          }}
-                          className="text-red-400 hover:text-red-300 font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <X size={12} /> Pedir Ajuste
-                        </button>
-                      </div>
-                    )}
-
-                    {onOpenClientWorkspace && (
+                    {onOpenClientWorkspace && deliv.client && (
                       <button
                         onClick={() => onOpenClientWorkspace(deliv.client, 'approvals')}
                         className="text-cs-text-secondary hover:text-white flex items-center gap-1 ml-auto font-medium transition-colors"
@@ -406,7 +334,11 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
           );
         })}
 
-        {filteredDeliverables.length === 0 && (
+        {loading && <p role="status" className="col-span-full text-sm">Carregando aprovações…</p>}
+        {error && <p role="alert" className="col-span-full text-sm text-red-300">
+          {error} <button type="button" onClick={refresh} className="underline">Tentar novamente</button>
+        </p>}
+        {!loading && !error && filteredDeliverables.length === 0 && (
           <div className="col-span-full py-20 text-center bg-cs-surface border border-cs-border rounded-3xl border-dashed">
             <CheckCircle2 size={48} className="mx-auto mb-3 text-cs-primary/30" />
             <h4 className="text-white font-bold text-sm">Nenhum entregável encontrado</h4>
@@ -425,7 +357,7 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
                   <CheckCircle2 size={20} className="text-cs-primary" />
                   Review Center • Gestão de Versões & Aprovações
                 </h3>
-                <p className="text-xs text-cs-text-secondary">Envie novas versões, aprove ou solicite ajustes diretamente.</p>
+                <p className="text-xs text-cs-text-secondary">Envie versões e consulte as decisões registradas pelo cliente.</p>
               </div>
               <button 
                 onClick={() => setSelectedReviewTaskId(null)}
@@ -436,11 +368,7 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
             </div>
 
             <div className="p-2">
-              <ApprovalFlow 
-                taskId={selectedReviewTaskId} 
-                userRole="agency" 
-                userId="agency-admin" 
-              />
+              <ApprovalFlow taskId={selectedReviewTaskId} />
             </div>
           </div>
         </div>
@@ -460,7 +388,7 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveUpload} className="space-y-4">
+            <form onSubmit={handleSelectTask} className="space-y-4">
               <div>
                 <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Cliente</label>
                 <select
@@ -494,36 +422,12 @@ export default function ReviewCenterHub({ onOpenClientWorkspace }) {
                 </select>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Nome do Arquivo / Título da Peça</label>
-                <input
-                  type="text"
-                  value={uploadFileName}
-                  onChange={e => setUploadFileName(e.target.value)}
-                  placeholder="Ex: Post_DiaDasMaes_v1.png ou Carrossel 01"
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-cs-primary"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Link do Arquivo (Figma, Drive, Imagem)</label>
-                <input
-                  type="url"
-                  value={uploadUrl}
-                  onChange={e => setUploadUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/... ou link do Figma/Drive"
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-cs-primary"
-                  required
-                />
-              </div>
-
               <div className="pt-4">
                 <button
                   type="submit"
                   className="w-full bg-cs-primary hover:bg-cs-primary-hover text-black font-bold py-3.5 rounded-xl text-xs transition-all shadow-xl shadow-cs-primary/20 flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
                 >
-                  <FileUp size={16} /> Enviar Peça para o Review Center
+                  <FileUp size={16} /> Abrir envio da versão
                 </button>
               </div>
             </form>

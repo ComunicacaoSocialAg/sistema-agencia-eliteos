@@ -134,6 +134,12 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Sessão inválida ou expirada." }, 401);
     }
 
+    const { data: profile, error: profileError } = await supabase.from("profiles")
+      .select("role").eq("id", user.id).maybeSingle();
+    if (profileError || !["admin", "commercial", "production"].includes(profile?.role)) {
+      return json({ error: "O acesso à IA é restrito à equipe da agência." }, 403);
+    }
+
     const body = await req.json();
     const {
       systemPrompt,

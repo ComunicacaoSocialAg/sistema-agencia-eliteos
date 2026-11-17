@@ -1,6 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { useTasks } from './useTasks';
+
+export const APPROVAL_EVENT = 'csag:approval-updated';
+const STORAGE_KEY = 'csag_custom_deliverables';
+const BUCKET = 'agency-approvals';
+const MAX_FILE = 20 * 1024 * 1024;
+const FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf', 'video/mp4', 'video/webm', 'video/quicktime'];
 
 const DEFAULT_DEMO_DELIVERABLES = [
   {
@@ -45,396 +53,218 @@ const DEFAULT_DEMO_DELIVERABLES = [
   }
 ];
 
-function getStoredDeliverables() {
+function readVersions() {
   try {
-    const raw = localStorage.getItem('csag_custom_deliverables');
-    if (!raw) {
-      localStorage.setItem('csag_custom_deliverables', JSON.stringify(DEFAULT_DEMO_DELIVERABLES));
-      return DEFAULT_DEMO_DELIVERABLES;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return DEFAULT_DEMO_DELIVERABLES;
-  }
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (Array.isArray(saved)) return saved;
+  } catch { /* dados de demonstração */ }
+  return DEFAULT_DEMO_DELIVERABLES;
 }
 
-function saveStoredDeliverables(items) {
+function newestFirst(a, b) {
+  return b.version_number - a.version_number
+    || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    || String(b.id).localeCompare(String(a.id));
+}
+
+function safeLink(value) {
   try {
-    localStorage.setItem('csag_custom_deliverables', JSON.stringify(items));
-  } catch (e) {
-    console.warn('Erro ao salvar entregáveis:', e);
+    const url = new URL(value);
+    if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) return url.href;
+  } catch { /* URL inválida */ }
+  return null;
+}
+
+export function getPublicAppOrigin() {
+  if (typeof window === 'undefined') return 'https://sistema-agencia-eliteos.vercel.app';
+  const host = window.location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.') || host.endsWith('.local');
+  return isLocal ? 'https://sistema-agencia-eliteos.vercel.app' : window.location.origin;
+}
+
+export function copyApprovalUrl(taskId) {
+  const link = new URL('/aprovar/' + encodeURIComponent(taskId), getPublicAppOrigin()).href;
+  return navigator.clipboard?.writeText(link).then(() => link) ?? Promise.reject(new Error('Área de transferência indisponível'));
+}
+
+export async function openApprovalAsset(version, target) {
+  if (version.file_url?.startsWith('storage:')) {
+    const { data, error } = await supabase.storage.from(BUCKET)
+      .createSignedUrl(version.file_url.slice(8), 60, { download: version.file_name });
+    if (error || !data?.signedUrl) throw new Error('Não foi possível abrir o arquivo. Recarregue e tente novamente.');
+    target.location.replace(data.signedUrl);
+    return;
   }
+  const url = safeLink(version.file_url);
+  if (!url) throw new Error('Este material precisa ser reenviado com um link válido.');
+  target.location.replace(url);
 }
 
-export function useDeliverables(taskId) {
-  const [versions, setVersions] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchVersions = useCallback(async () => {
-    if (!taskId) return;
-    setLoading(true);
-
-    if (!isSupabaseConfigured) {
-      const all = getStoredDeliverables();
-      const filtered = all.filter(d => d.task_id === taskId).sort((a, b) => b.version_number - a.version_number);
-      setVersions(filtered);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('task_deliverables')
-        .select(`*`)
-        .eq('task_id', taskId)
-        .order('version_number', { ascending: false });
-
-      if (error) {
-        // Fallback to local storage
-        const all = getStoredDeliverables();
-        const filtered = all.filter(d => d.task_id === taskId).sort((a, b) => b.version_number - a.version_number);
-        setVersions(filtered);
-      } else {
-        setVersions(data || []);
-      }
-    } catch {
-      const all = getStoredDeliverables();
-      const filtered = all.filter(d => d.task_id === taskId).sort((a, b) => b.version_number - a.version_number);
-      setVersions(filtered);
-    } finally {
-      setLoading(false);
-    }
-  }, [taskId]);
-
-  useEffect(() => {
-    fetchVersions();
-  }, [fetchVersions]);
-
-  const uploadVersion = async (fileOrLink, uploadedBy = 'Equipe CS Ag') => {
-    const isLink = typeof fileOrLink === 'string';
-    const fileName = isLink ? (fileOrLink.startsWith('http') ? fileOrLink : 'Link Externo') : fileOrLink.name;
-    let finalUrl = '';
-
-    if (!isSupabaseConfigured) {
-      // Demo mode fallback
-      finalUrl = isLink ? fileOrLink : (typeof URL !== 'undefined' && fileOrLink instanceof Blob ? URL.createObjectURL(fileOrLink) : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop');
-      const all = getStoredDeliverables();
-      const existingTaskVersions = all.filter(d => d.task_id === taskId);
-      const nextVersionNum = existingTaskVersions.length + 1;
-
-      const mockVersion = {
-        id: `deliv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        task_id: taskId,
-        version_number: nextVersionNum,
-        file_url: finalUrl,
-        file_name: fileName,
-        status: 'pendente',
-        uploaded_by: uploadedBy,
-        created_at: new Date().toISOString()
-      };
-
-      const updated = [mockVersion, ...all];
-      saveStoredDeliverables(updated);
-      setVersions(prev => [mockVersion, ...prev]);
-
-      // Atualizar status da tarefa para 'aguardando-cliente' no localStorage
-      try {
-        const rawTasks = localStorage.getItem('csag_custom_tasks');
-        if (rawTasks) {
-          const tasks = JSON.parse(rawTasks);
-          const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, status: 'aguardando-cliente' } : t);
-          localStorage.setItem('csag_custom_tasks', JSON.stringify(updatedTasks));
-        }
-      } catch (e) {
-        console.warn(e);
-      }
-
-      toast.success(`Entregável v${nextVersionNum} enviado para aprovação!`);
-      return mockVersion;
-    }
-
-    try {
-      setLoading(true);
-
-      if (isLink) {
-        finalUrl = fileOrLink;
-      } else {
-        const fileExt = fileOrLink.name.split('.').pop();
-        const uploadName = `${taskId}/deliverables/${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage
-          .from('deliverables')
-          .upload(uploadName, fileOrLink);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('deliverables')
-          .getPublicUrl(uploadName);
-        
-        finalUrl = publicUrl;
-      }
-
-      const { data: versionData, error: versionError } = await supabase
-        .from('task_deliverables')
-        .insert({
-          task_id: taskId,
-          version_number: versions.length + 1,
-          file_url: finalUrl,
-          file_name: fileName,
-          uploaded_by: uploadedBy,
-          status: 'pendente'
-        })
-        .select()
-        .single();
-
-      if (versionError) throw versionError;
-
-      setVersions(prev => [versionData, ...prev]);
-      toast.success('Entregável enviado para aprovação!');
-      return versionData;
-    } catch (err) {
-      console.error('Upload error:', err);
-      // Fallback local
-      finalUrl = isLink ? fileOrLink : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop';
-      const all = getStoredDeliverables();
-      const mockVersion = {
-        id: `deliv-${Date.now()}`,
-        task_id: taskId,
-        version_number: versions.length + 1,
-        file_url: finalUrl,
-        file_name: fileName,
-        status: 'pendente',
-        uploaded_by: uploadedBy,
-        created_at: new Date().toISOString()
-      };
-      saveStoredDeliverables([mockVersion, ...all]);
-      setVersions(prev => [mockVersion, ...prev]);
-      toast.success('Entregável registrado em modo seguro local!');
-      return mockVersion;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateStatus = async (versionId, status, comment, reviewerId) => {
-    // 1. Atualizar no estado local do hook
-    setVersions(prev => prev.map(v => v.id === versionId ? { ...v, status, client_comment: comment } : v));
-
-    // 2. Atualizar no localStorage
-    const all = getStoredDeliverables();
-    const updatedDeliverables = all.map(d => d.id === versionId ? { ...d, status, client_comment: comment, reviewed_at: new Date().toISOString() } : d);
-    saveStoredDeliverables(updatedDeliverables);
-
-    // 3. Atualizar status da Tarefa correspondente
-    try {
-      const rawTasks = localStorage.getItem('csag_custom_tasks');
-      if (rawTasks) {
-        const tasks = JSON.parse(rawTasks);
-        const targetStatus = status === 'aprovado' ? 'finalizado' : 'ajustes';
-        const updatedTasks = tasks.map(t => {
-          if (t.id === taskId) {
-            const comments = t.comments || [];
-            if (comment) {
-              comments.push({
-                id: `comment-${Date.now()}`,
-                author: 'Cliente (Review Center)',
-                text: `**Avaliação do Entregável:** ${status.toUpperCase()}\n${comment}`,
-                date: 'Agora',
-                is_system: true
-              });
-            }
-            return { ...t, status: targetStatus, comments };
-          }
-          return t;
-        });
-        localStorage.setItem('csag_custom_tasks', JSON.stringify(updatedTasks));
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-
-    // 4. Se Supabase ativo, sincronizar no banco
-    if (isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('task_deliverables')
-          .update({
-            status,
-            client_comment: comment,
-            reviewed_at: new Date().toISOString()
-          })
-          .eq('id', versionId);
-
-        if (status === 'aprovado') {
-          await supabase.from('tasks').update({ status: 'finalizado' }).eq('id', taskId);
-        } else if (status === 'reprovado' || status === 'com_ressalvas') {
-          await supabase.from('tasks').update({ status: 'ajustes' }).eq('id', taskId);
-          if (comment) {
-            await supabase.from('task_comments').insert({
-              task_id: taskId,
-              content: `**Feedback de Ajuste (Cliente):**\n${comment}`,
-              author_name: 'Cliente',
-              is_system: false
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('Erro ao sincronizar com Supabase:', err);
-      }
-    }
-
-    if (status === 'aprovado') {
-      toast.success('🎉 Entregável APROVADO! Tarefa concluída.');
-    } else {
-      toast.success('Feedback de ajuste enviado para a equipe de criação!');
-    }
-  };
-
-  return { versions, loading, fetchVersions, uploadVersion, updateStatus };
-}
-
-export function getAllDeliverables() {
-  return getStoredDeliverables();
-}
-
-export function useAllDeliverables() {
-  const [deliverables, setDeliverables] = useState([]);
-  const [loading, setLoading] = useState(false);
+function useVersions(taskId) {
+  const { user, role, isDemoMode } = useAuth();
+  const { refresh: refreshTasks, updateTask } = useTasks();
+  const accountId = user?.id || null;
+  const scopeKey = accountId || (taskId ? 'public' : null);
+  const [result, setResult] = useState({ accountId: null, taskId: undefined, items: [], error: '' });
+  const request = useRef(0);
+  const inFlight = useRef(false);
+  const pendingUpload = useRef(null);
+  const demo = isDemoMode || !isSupabaseConfigured;
+  const staff = ['admin', 'commercial', 'production'].includes(role);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
-    if (!isSupabaseConfigured) {
-      const items = getStoredDeliverables();
-      setDeliverables(items);
-      setLoading(false);
-      return;
-    }
+    const id = ++request.current;
+    if (!scopeKey) return;
     try {
-      const { data, error } = await supabase
-        .from('task_deliverables')
-        .select('*')
-        .order('created_at', { ascending: false });
-      const localItems = getStoredDeliverables();
-      if (error || !data) {
-        setDeliverables(localItems);
+      let items;
+      if (demo) {
+        items = readVersions().filter(item => !taskId || item.task_id === taskId);
       } else {
-        const remoteIds = new Set(data.map(d => d.id));
-        const localExtras = localItems.filter(l => !remoteIds.has(l.id));
-        const merged = [...data, ...localExtras];
-        setDeliverables(merged);
-        saveStoredDeliverables(merged);
+        const { data, error } = await supabase.rpc('approval_versions', { p_task_id: taskId || null });
+        if (error) throw error;
+        items = data || [];
       }
+      if (request.current === id) setResult({ accountId: scopeKey, taskId, items: [...items].sort(newestFirst), error: '' });
     } catch {
-      setDeliverables(getStoredDeliverables());
-    } finally {
-      setLoading(false);
+      if (request.current === id) setResult({ accountId: scopeKey, taskId, items: [], error: 'Não foi possível carregar as versões.' });
     }
-  }, []);
+  }, [scopeKey, demo, taskId]);
 
   useEffect(() => {
     refresh();
+    window.addEventListener(APPROVAL_EVENT, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      request.current++;
+      window.removeEventListener(APPROVAL_EVENT, refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, [refresh]);
 
-  const updateDeliverableStatus = async (versionId, taskId, status, comment = '') => {
-    // 1. Atualizar localStorage
-    const all = getStoredDeliverables();
-    const updated = all.map(d => d.id === versionId ? { ...d, status, client_comment: comment, reviewed_at: new Date().toISOString() } : d);
-    saveStoredDeliverables(updated);
-    setDeliverables(updated);
+  async function completeChange() {
+    window.dispatchEvent(new Event(APPROVAL_EVENT));
+    await refreshTasks?.();
+  }
 
-    // 2. Atualizar tarefas
+  async function addDeliverable({ taskId: targetId, fileOrUrl, fileName }) {
+    if (!staff || !accountId || !targetId || inFlight.current) return null;
+    inFlight.current = true;
     try {
-      const rawTasks = localStorage.getItem('csag_custom_tasks');
-      if (rawTasks) {
-        const tasks = JSON.parse(rawTasks);
-        const targetStatus = status === 'aprovado' ? 'finalizado' : 'ajustes';
-        const updatedTasks = tasks.map(t => {
-          if (t.id === taskId) {
-            const comments = t.comments || [];
-            if (comment) {
-              comments.push({
-                id: `comment-${Date.now()}`,
-                author: 'Equipe (Review Center)',
-                text: `**Avaliação do Entregável:** ${status.toUpperCase()}\n${comment}`,
-                date: 'Agora',
-                is_system: true
-              });
-            }
-            return { ...t, status: targetStatus, comments };
-          }
-          return t;
-        });
-        localStorage.setItem('csag_custom_tasks', JSON.stringify(updatedTasks));
+      const isLink = typeof fileOrUrl === 'string';
+      let url = isLink ? safeLink(fileOrUrl.trim()) : null;
+      if (isLink && !url) throw new Error('Informe um link completo com http ou https.');
+      if (!isLink && (demo || !fileOrUrl || !FILE_TYPES.includes(fileOrUrl.type) || fileOrUrl.size > MAX_FILE)) {
+        throw new Error(demo ? 'Use um link na demonstração.' : 'Escolha uma imagem, PDF ou vídeo compatível de até 20 MB. Para arquivos maiores, use um link.');
       }
-    } catch (e) {
-      console.warn(e);
-    }
-
-    // 3. Supabase sync se disponível
-    if (isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('task_deliverables')
-          .update({
-            status,
-            client_comment: comment,
-            reviewed_at: new Date().toISOString()
-          })
-          .eq('id', versionId);
-
-        if (status === 'aprovado') {
-          await supabase.from('tasks').update({ status: 'finalizado' }).eq('id', taskId);
-        } else {
-          await supabase.from('tasks').update({ status: 'ajustes' }).eq('id', taskId);
+      const name = (fileName?.trim() || (isLink ? new URL(url).hostname : fileOrUrl.name)).slice(0, 255);
+      const key = isLink ? `${targetId}:${name}:${url}` : fileOrUrl;
+      if (pendingUpload.current?.key !== key || pendingUpload.current.taskId !== targetId) {
+        pendingUpload.current = { key, taskId: targetId, id: crypto.randomUUID(), uploaded: false };
+      }
+      const version = pendingUpload.current;
+      let saved;
+      if (demo) {
+        const items = readVersions();
+        const existing = items.find(item => item.id === version.id);
+        saved = existing || {
+          id: version.id, task_id: targetId, file_url: url, file_name: name, status: 'pendente',
+          version_number: Math.max(0, ...items.filter(item => item.task_id === targetId).map(item => item.version_number)) + 1,
+          created_at: new Date().toISOString(),
+        };
+        if (!await updateTask({ id: targetId, status: 'aguardando-cliente', demand_status: 'aguardando_cliente' })) {
+          throw new Error('A demanda precisa existir para receber uma versão.');
         }
-      } catch (err) {
-        console.warn('Erro ao sincronizar com Supabase:', err);
+        if (!existing) localStorage.setItem(STORAGE_KEY, JSON.stringify([saved, ...items]));
+      } else {
+        if (!isLink) {
+          const path = `${targetId}/${version.id}`;
+          if (!version.uploaded) {
+            const { error } = await supabase.storage.from(BUCKET).upload(path, fileOrUrl, { contentType: fileOrUrl.type });
+            if (error) {
+              const probe = await supabase.storage.from(BUCKET).createSignedUrl(path, 30);
+              if (!probe.data?.signedUrl) throw error;
+            }
+            version.uploaded = true;
+          }
+          url = 'storage:' + path;
+        }
+        const { data, error } = await supabase.rpc('publish_approval_version', {
+          p_task_id: targetId, p_version_id: version.id, p_file_url: url, p_file_name: name,
+        });
+        if (error || !data) throw error || new Error('O envio não foi confirmado.');
+        saved = data;
       }
+      pendingUpload.current = null;
+      await completeChange();
+      toast.success('Versão enviada para aprovação.');
+      return saved;
+    } catch (error) {
+      toast.error(error?.message || 'A versão não foi confirmada. Tente novamente.');
+      return null;
+    } finally {
+      inFlight.current = false;
     }
+  }
 
-    if (status === 'aprovado') {
-      toast.success('🎉 Entregável APROVADO com sucesso!');
-    } else {
-      toast.success('Entregável marcado para AJUSTES.');
+  async function updateDeliverableStatus(versionId, targetId, status, comment = '') {
+    if (!scopeKey || inFlight.current) return null;
+    const feedback = comment.trim();
+    const decision = status === 'ajustes' ? 'reprovado' : status;
+    if (!['aprovado', 'reprovado', 'com_ressalvas'].includes(decision)
+        || (decision !== 'aprovado' && !feedback) || feedback.length > 4000) {
+      toast.error('Escreva o que precisa mudar para pedir ajustes.');
+      return null;
     }
-  };
-
-  const addDeliverable = async ({ taskId, fileOrUrl, fileName, versionNumber }) => {
-    const isLink = typeof fileOrUrl === 'string';
-    const finalName = fileName || (isLink ? 'Link Externo' : 'Novo Arquivo');
-    const finalUrl = isLink ? fileOrUrl : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop';
-    
-    const newDeliverable = {
-      id: `deliv-${Date.now()}`,
-      task_id: taskId,
-      version_number: versionNumber || 1,
-      file_url: finalUrl,
-      file_name: finalName,
-      status: 'pendente',
-      client_comment: null,
-      created_at: new Date().toISOString()
-    };
-
-    const all = getStoredDeliverables();
-    const updated = [newDeliverable, ...all];
-    saveStoredDeliverables(updated);
-    setDeliverables(updated);
-
-    // Update task status
+    inFlight.current = true;
     try {
-      const rawTasks = localStorage.getItem('csag_custom_tasks');
-      if (rawTasks) {
-        const tasks = JSON.parse(rawTasks);
-        const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, status: 'aguardando-cliente' } : t);
-        localStorage.setItem('csag_custom_tasks', JSON.stringify(updatedTasks));
+      let saved;
+      if (demo) {
+        const items = readVersions();
+        const latest = items.filter(item => item.task_id === targetId).sort(newestFirst)[0];
+        if (latest?.id !== versionId || latest.status !== 'pendente') {
+          throw new Error('Abra a versão atual e confira se ainda está pendente.');
+        }
+        if (!await updateTask({
+          id: targetId, status: decision === 'aprovado' ? 'em-producao' : 'ajustes',
+          demand_status: decision === 'aprovado' ? 'em_producao' : 'ajustes',
+        })) throw new Error('Não foi possível atualizar a demanda.');
+        saved = { ...latest, status: decision, client_comment: feedback, reviewed_at: new Date().toISOString() };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => item.id === versionId ? saved : item)));
+      } else {
+        const { data, error } = await supabase.rpc('review_approval_version', {
+          p_version_id: versionId, p_status: decision, p_comment: feedback || null,
+        });
+        if (error || !data) throw error || new Error('A decisão não foi confirmada.');
+        saved = data;
       }
-    } catch (e) {
-      console.warn(e);
+      await completeChange();
+      toast.success(decision === 'aprovado' ? 'Aprovação registrada.' : 'Pedido de ajustes registrado.');
+      return saved;
+    } catch (error) {
+      toast.error(error?.message || 'Não foi possível registrar a decisão.');
+      await refresh();
+      return null;
+    } finally {
+      inFlight.current = false;
     }
+  }
 
-    toast.success('🚀 Novo entregável enviado para o Review Center!');
-    return newDeliverable;
+  const loaded = result.accountId === scopeKey && result.taskId === taskId;
+  return {
+    deliverables: loaded ? result.items : [], loading: Boolean(scopeKey && !loaded),
+    error: loaded ? result.error : '', refresh, addDeliverable, updateDeliverableStatus, demo, staff,
   };
+}
 
-  return { deliverables, loading, refresh, updateDeliverableStatus, addDeliverable };
+export function useDeliverables(taskId) {
+  const list = useVersions(taskId);
+  return {
+    ...list, versions: list.deliverables,
+    uploadVersion: (fileOrUrl, fileName) => list.addDeliverable({ taskId, fileOrUrl, fileName }),
+    updateStatus: (id, status, comment) => list.updateDeliverableStatus(id, taskId, status, comment),
+  };
+}
+
+export function useAllDeliverables() {
+  return useVersions(null);
 }

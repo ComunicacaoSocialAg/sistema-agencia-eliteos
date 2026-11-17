@@ -9,8 +9,8 @@
 
 import { supabase, isSupabaseConfigured } from './supabase';
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
+const GEMINI_API_KEY = import.meta.env.DEV ? import.meta.env.VITE_GEMINI_API_KEY || '' : '';
+const OPENAI_API_KEY = import.meta.env.DEV ? import.meta.env.VITE_OPENAI_API_KEY || '' : '';
 
 export const isGeminiConfigured = Boolean(isSupabaseConfigured || GEMINI_API_KEY);
 export const isOpenAIConfigured = Boolean(isSupabaseConfigured || OPENAI_API_KEY);
@@ -279,8 +279,9 @@ function parseAgentResponse(agentId, text, provider) {
   return { text, provider };
 }
 
-export async function generateContent(prompt, preferredProvider = 'auto') {
+export async function generateContent(prompt, preferredProvider = 'auto', { requireProvider = false } = {}) {
   const res = await chatWithAgent('brief', [], prompt, preferredProvider);
+  if (requireProvider && res.provider === 'contextual-fallback') throw new Error('Serviço de IA indisponível');
   return res.text;
 }
 

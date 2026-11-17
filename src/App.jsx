@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, DollarSign, BarChart, Settings, Bot, LogOut, Search, Bell, Sparkles, Shield, Beaker, Menu, X, ClipboardList, Palette, BarChart3, Radio } from 'lucide-react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { LayoutDashboard, Briefcase, Users, DollarSign, BarChart, Settings, Bot, LogOut, Search, Bell, Sparkles, Shield, Beaker, Menu, X, ClipboardList, Palette, BarChart3, Radio, Zap } from 'lucide-react';
 import SandboxView from './views/SandboxView';
+import FocusActionView from './views/FocusActionView';
 import { Toaster } from 'react-hot-toast';
 import { cn } from './utils/cn';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -24,10 +25,12 @@ import PublicClientOnboardingView from './views/PublicClientOnboardingView';
 import BuzzMonitorView from './views/BuzzMonitorView';
 import { ActiveClientProvider, useActiveClient } from './contexts/ActiveClientContext';
 import { useRecurring } from './hooks/useRecurring';
+import { TasksProvider } from './hooks/useTasks';
 import { useNotifications } from './hooks/useNotifications';
 
 // Role-based nav items
 const ALL_NAV_ITEMS = [
+  { id: 'direcao', label: 'Direção do Dia', icon: Zap, desc: 'Foco imediato e captura rápida', roles: ['admin', 'commercial', 'production'] },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, desc: 'Resumo pessoal do dia', roles: ['admin', 'commercial', 'production'] },
   { id: 'buzzmonitor', label: 'Social & Conteúdo', icon: Radio, desc: 'Grade editorial e pautas', roles: ['admin', 'commercial', 'production'] },
   { id: 'clientes', label: 'Clientes & Projetos', icon: Users, desc: 'Hub completo do cliente', roles: ['admin', 'commercial', 'production'] },
@@ -53,17 +56,16 @@ function AppShell() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { checkAndGenerate } = useRecurring();
-  const { alerts, dismiss, dismissAll } = useNotifications();
+  const { alerts, dismiss, dismissAll } = useNotifications(role !== 'client');
 
-  // Guard: esperar até que o perfil esteja carregado
-  const effectiveRole = role || 'admin';
+  const effectiveRole = role;
 
   const [activeView, setActiveView] = useState(() => {
     try {
       const saved = localStorage.getItem('csag_active_view');
-      return saved || (effectiveRole === 'client' ? 'hub' : 'dashboard');
+      return saved || (effectiveRole === 'client' ? 'hub' : 'direcao');
     } catch {
-      return effectiveRole === 'client' ? 'hub' : 'dashboard';
+      return effectiveRole === 'client' ? 'hub' : 'direcao';
     }
   });
 
@@ -77,7 +79,15 @@ function AppShell() {
     ? CLIENT_NAV_ITEMS
     : ALL_NAV_ITEMS.filter(item => item.roles.includes(effectiveRole));
 
-  const validView = (activeView === 'sandbox' && effectiveRole === 'admin') 
+  const query = searchValue.trim().toLocaleLowerCase('pt-BR');
+  const matchingViews = query ? navItems.filter(item =>
+    `${item.label} ${item.desc}`.toLocaleLowerCase('pt-BR').includes(query)) : [];
+  const openSearchResult = item => {
+    setActiveView(item.id);
+    setSearchValue('');
+  };
+
+  const validView = (activeView === 'sandbox' && effectiveRole === 'admin' && isDemoMode) 
     ? 'sandbox' 
     : (navItems.find(i => i.id === activeView) ? activeView : navItems[0]?.id);
 
@@ -206,7 +216,7 @@ function AppShell() {
             )}
 
             {/* Persona Switcher for effortless Multi-role testing */}
-            <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
+            {isDemoMode && <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
               <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider hidden lg:inline">Alternar Perfil:</span>
               <select
                 value={profile?.email || 'admin@csag.com'}
@@ -221,20 +231,34 @@ function AppShell() {
                 <option value="cliente@dubola.com.br" className="bg-cs-bg text-white">🥫 Roberto (Cliente : Dubola Molhos)</option>
                 <option value="cliente@dralberto.com.br" className="bg-cs-bg text-white">🩺 Dr. Alberto Brasil (Cliente : Cirurgião Vascular)</option>
               </select>
-            </div>
+            </div>}
 
-            <div className="relative hidden md:block">
+            {effectiveRole !== 'client' && <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-cs-text-secondary" size={14} />
               <input
                 type="text"
                 value={searchValue}
                 onChange={e => setSearchValue(e.target.value)}
-                placeholder="Buscar no sistema..."
+                aria-label="Buscar módulo"
+                onKeyDown={event => {
+                  if (event.key === 'Escape') setSearchValue('');
+                  if (event.key === 'Enter' && matchingViews.length) openSearchResult(matchingViews[0]);
+                }}
+                placeholder="Buscar módulo..."
                 className="bg-cs-surface border border-cs-border rounded-full pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-cs-primary focus:ring-1 focus:ring-cs-primary transition-all w-48 text-white placeholder:text-cs-text-secondary"
               />
-            </div>
-            <div className="relative">
+              {query && (
+                <ul className="absolute right-0 top-full mt-2 w-64 bg-cs-surface border border-cs-border rounded-xl p-2 z-50">
+                  {matchingViews.length ? matchingViews.map(item => (
+                    <li key={item.id}><button type="button" onClick={() => openSearchResult(item)}
+                      className="w-full text-left px-3 py-2 text-xs rounded hover:bg-cs-bg">{item.label}</button></li>
+                  )) : <li className="px-3 py-2 text-xs text-cs-text-secondary">Nenhum módulo encontrado</li>}
+                </ul>
+              )}
+            </div>}
+            {effectiveRole !== 'client' && <div className="relative">
               <button 
+                aria-label="Notificações"
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-lg text-cs-text-secondary hover:text-white hover:bg-cs-surface transition-colors"
               >
@@ -271,12 +295,13 @@ function AppShell() {
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
           </div>
         </header>
 
         <div className="flex-1 overflow-x-auto overflow-y-hidden">
           <ViewErrorBoundary viewKey={validView}>
+            {validView === 'direcao' && <FocusActionView />}
             {validView === 'dashboard' && <DashboardView />}
             {validView === 'buzzmonitor' && <BuzzMonitorView />}
             {validView === 'clientes' && <ClientsView />}
@@ -295,10 +320,10 @@ function AppShell() {
       </main>
 
       {/* Global AI Floating Assistant */}
-      <AIAssistant />
+      {effectiveRole !== 'client' && <AIAssistant />}
 
       {/* Hidden Sandbox Entry for Admin */}
-      {effectiveRole === 'admin' && (
+      {effectiveRole === 'admin' && isDemoMode && (
         <button 
           onClick={() => setActiveView('sandbox')}
           className="fixed bottom-6 right-24 w-10 h-10 bg-cs-surface border border-cs-border rounded-full flex items-center justify-center text-cs-text-secondary hover:text-cs-accent hover:border-cs-accent transition-all z-[60] shadow-xl"
@@ -428,8 +453,10 @@ class GlobalErrorBoundary extends React.Component {
 }
 
 function AuthGate() {
-  const { user, loading } = useAuth();
-
+  const { user, loading, isRecoveringPassword } = useAuth();
+  const location = useLocation();
+  const from = location.state?.from;
+  const returnTo = typeof from === 'string' && /^\/aprovar\/[^/?#]+$/.test(from) ? from : '/';
   if (loading) {
     return (
       <div className="min-h-screen bg-cs-bg flex items-center justify-center">
@@ -444,12 +471,14 @@ function AuthGate() {
     );
   }
 
+  if (isRecoveringPassword) return <LoginView />;
+
   return (
     <Routes>
       <Route path="/aprovar/:taskId" element={<PublicApprovalView />} />
       <Route path="/cadastro" element={<PublicClientOnboardingView />} />
       <Route path="/onboarding" element={<PublicClientOnboardingView />} />
-      <Route path="/login" element={!user ? <LoginView /> : <Navigate to="/" />} />
+      <Route path="/login" element={!user ? <LoginView /> : <Navigate to={returnTo} replace />} />
       <Route path="/*" element={user ? <AppShell /> : <Navigate to="/login" />} />
     </Routes>
   );
@@ -461,9 +490,11 @@ export default function App() {
       <BrowserRouter>
         <AuthProvider>
           <ActiveClientProvider>
-            <AIAssistantProvider>
-              <AuthGate />
-            </AIAssistantProvider>
+            <TasksProvider>
+              <AIAssistantProvider>
+                <AuthGate />
+              </AIAssistantProvider>
+            </TasksProvider>
           </ActiveClientProvider>
         </AuthProvider>
       </BrowserRouter>

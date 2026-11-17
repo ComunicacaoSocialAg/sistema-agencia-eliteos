@@ -30,6 +30,7 @@ const STATUS_LABELS = {
   'revisao-interna': 'Revisão',
   'aguardando-cliente': 'Cliente',
   'ajustes': 'Ajustes',
+  'concluido': 'Concluído',
   'finalizado': 'Concluído'
 };
 
@@ -40,6 +41,7 @@ const STATUS_COLORS = {
   'revisao-interna': 'bg-orange-500',
   'aguardando-cliente': 'bg-yellow-500',
   'ajustes': 'bg-red-500',
+  'concluido': 'bg-green-500',
   'finalizado': 'bg-green-500'
 };
 
@@ -51,11 +53,13 @@ export default function ManagementView() {
   const { clients } = useClients();
   const { data: profitability = [] } = useProfitability();
   const { healthScores, capacity } = useIntelligence();
-  const { allUsers, createUser, deleteUser } = useAuth();
+  const { user, allUsers, createUser, deleteUser, isDemoMode } = useAuth();
   const [searchMember, setSearchMember] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: 'production', client_id: '' });
+  const [accessLink, setAccessLink] = useState('');
+  const [savingUser, setSavingUser] = useState(false);
 
   // 1. Team Load Calculation (Now using real capacity data)
   const teamLoad = useMemo(() => {
@@ -80,18 +84,45 @@ export default function ManagementView() {
     return { totalRevenue, netProfit: totalProfit, margin };
   }, [clients, profitability]);
 
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    if (!newUser.name || !newUser.email) return;
-    await createUser(newUser);
-    toast.success(`Usuário criado! Convite enviado para ${newUser.email}`);
+  async function generateAccess(person) {
+    if (savingUser || !person.name || !person.email) return false;
+    setSavingUser(true);
+    try {
+      const result = await createUser(person);
+      if (result.error) {
+        toast.error(result.error.message);
+        return false;
+      }
+      if (result.accessLink) setAccessLink(result.accessLink);
+      else toast.success('Acesso salvo na demonstração.');
+      return true;
+    } finally {
+      setSavingUser(false);
+    }
+  }
+
+  async function handleCreateUser(event) {
+    event.preventDefault();
+    if (!await generateAccess(newUser)) return;
     setNewUser({ name: '', email: '', role: 'production', client_id: '' });
     setShowAddUserModal(false);
-  };
+  }
 
-  const handleSendInvite = (email) => {
-    toast.success(`Convite de acesso reenviado para ${email}`);
-  };
+  async function revoke(id) {
+    if (!window.confirm('Revogar o acesso deste usuário ao sistema?')) return;
+    const result = await deleteUser(id);
+    if (result.error) toast.error(result.error.message);
+    else toast.success('Acesso revogado.');
+  }
+
+  async function copyAccessLink() {
+    try {
+      await navigator.clipboard.writeText(accessLink);
+      toast.success('Link copiado.');
+    } catch {
+      toast.error('Selecione o link para copiar manualmente.');
+    }
+  }
 
   return (
     <div className="h-full flex flex-col bg-cs-bg p-8 overflow-y-auto custom-scrollbar">
@@ -359,21 +390,21 @@ export default function ManagementView() {
                       </td>
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button 
-                            onClick={() => handleSendInvite(u.email)}
+                          {!isDemoMode && u.email && <button type="button" disabled={savingUser}
+                            onClick={() => generateAccess(u)}
                             className="p-1.5 rounded-lg text-cs-text-secondary hover:text-cs-primary hover:bg-cs-primary/10 transition-colors shrink-0"
-                            title="Reenviar Convite"
+                            title="Gerar novo link de acesso"
                           >
                             <Mail size={14} />
-                          </button>
+                          </button>}
                           <button 
-                            onClick={() => deleteUser(u.id)}
-                            disabled={u.id === 'demo-admin' || u.id === 'demo-commercial'}
+                            onClick={() => revoke(u.id)}
+                            disabled={u.id === user?.id || u.id === 'demo-admin'}
                             className={cn(
                               "p-1.5 rounded-lg text-cs-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0",
-                              (u.id === 'demo-admin' || u.id === 'demo-commercial') && "opacity-20 cursor-not-allowed"
+                              (u.id === user?.id || u.id === 'demo-admin') && "opacity-20 cursor-not-allowed"
                             )}
-                            title="Excluir usuário"
+                            title="Revogar acesso"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -385,6 +416,19 @@ export default function ManagementView() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {accessLink && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="access-link-title"
+            className="w-full max-w-md space-y-4 rounded-xl border border-cs-border bg-cs-surface p-5">
+            <h3 id="access-link-title" className="font-semibold text-white">Link de acesso</h3>
+            <input aria-label="Link de acesso" readOnly value={accessLink} onFocus={event => event.target.select()}
+              className="w-full rounded-lg border border-cs-border bg-cs-bg p-2 text-sm text-white" />
+            <button type="button" onClick={copyAccessLink} className="mr-4 text-sm text-cs-primary underline">Copiar link</button>
+            <button type="button" onClick={() => setAccessLink('')} className="text-sm text-cs-text-secondary underline">Fechar</button>
+          </section>
         </div>
       )}
 
@@ -466,7 +510,7 @@ export default function ManagementView() {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="submit" disabled={savingUser}
                   className="flex-1 bg-cs-primary hover:bg-opacity-95 text-black text-sm font-bold py-2.5 rounded-xl transition-colors"
                 >
                   Cadastrar

@@ -34,7 +34,8 @@ import toast from 'react-hot-toast';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { generateStrategicPlan } from '../lib/openai';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
-import { useClientPortal } from '../hooks/useClientPortal';
+import { useAuth } from '../contexts/AuthContext';
+import { copyApprovalUrl } from '../hooks/useDeliverables';
 import { useTasks } from '../hooks/useTasks';
 import { useTeam } from '../hooks/useTeam';
 import { useInvoices } from '../hooks/useInvoices';
@@ -94,7 +95,8 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
   const [client, setClient] = useState(initialClient);
   const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const isPortal = viewMode === 'portal';
-  const { dashboard, loading } = useClientPortal(isPortal ? client.id : null);
+  const { role, isDemoMode, createUser } = useAuth();
+  const [showInvite, setShowInvite] = useState(false);
   const { setContext } = useAIAssistant();
   const { tasks, createTask } = useTasks(client.id);
   const { invoices } = useInvoices();
@@ -110,11 +112,10 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     }
   }, [initialClient, initialTab]);
 
-  const handleUpdateClient = (updatedClient) => {
-    setClient(updatedClient);
-    if (onUpdateClient) {
-      onUpdateClient(updatedClient);
-    }
+  const handleUpdateClient = async (updatedClient) => {
+    const saved = onUpdateClient ? await onUpdateClient(updatedClient) : updatedClient;
+    if (saved) setClient(saved);
+    return saved;
   };
 
   // Sincronizar contexto da IA com dados do Reportei e Memórias Persistentes
@@ -141,7 +142,6 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         title: `Hub: ${client.name}`,
         data: {
           client,
-          dashboard,
           ai_memories: memories, // Injeta as memórias permanentemente no prompt!
           reportei_linked: !!client.reportei_config?.project_id,
           reportei_id: client.reportei_config?.project_id
@@ -150,7 +150,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     }
     
     updateContext();
-  }, [client, dashboard, setContext]);
+  }, [client, setContext]);
 
   const tabs = [
     { id: 'overview', label: 'Geral', icon: LayoutDashboard },
@@ -252,6 +252,11 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
                 >
                   <MessageSquare size={16} /> Relatório WhatsApp
                 </button>
+                {role === 'admin' && !isDemoMode && (
+                  <button type="button" onClick={() => setShowInvite(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    Convidar cliente
+                  </button>
+                )}
                 <button onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                   <Settings size={16} /> Configurar
                 </button>
@@ -293,7 +298,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
           <ClientLifecycle currentStage={client.lifecycle_stage || 'performance'} />
         )}
 
-        {activeTab === 'overview' && <OverviewTab client={client} isPortal={isPortal} dashboard={dashboard} invoices={clientInvoices} tasks={tasks} />}
+        {activeTab === 'overview' && <OverviewTab client={client} isPortal={isPortal} invoices={clientInvoices} tasks={tasks} />}
         {activeTab === 'dna' && (
           <DNATab client={client} createTask={createTask} onUpdateClient={handleUpdateClient} />
         )}
@@ -316,6 +321,8 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         {activeTab === 'governance' && !isPortal && <GovernanceModule client={client} />}
       </div>
 
+      {showInvite && <ClientInvite client={client} createUser={createUser} onClose={() => setShowInvite(false)} />}
+
       {showConfigModal && (
         <ClientConfigModal 
           client={client} 
@@ -328,13 +335,63 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
       {showNewDemand && (
         <NewTaskModal 
           onClose={() => setShowNewDemand(false)} 
-          onSave={(task) => {
-            createTask(task);
-            setShowNewDemand(false);
-          }} 
+          onSave={createTask}
           initialClient={client}
         />
       )}
+    </div>
+  );
+}
+
+function ClientInvite({ client, createUser, onClose }) {
+  const [name, setName] = useState(client.contact_name || '');
+  const [email, setEmail] = useState(client.contact_email || '');
+  const [link, setLink] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const input = 'w-full rounded-lg border border-cs-border bg-cs-bg p-2 text-white';
+
+  async function submit(event) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const result = await createUser({ name, email, role: 'client', client_id: client.id });
+      if (!result?.accessLink) setError(result?.error?.message || 'O link não foi gerado.');
+      else setLink(result.accessLink);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function copy(event) {
+    const field = event.currentTarget.closest('div').querySelector('input');
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success('Convite copiado.');
+    } catch {
+      field?.select();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
+      <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="client-invite-title"
+        className="w-full max-w-md space-y-4 rounded-2xl border border-cs-border bg-cs-surface p-6">
+        <h2 id="client-invite-title" className="text-lg font-semibold text-white">Convidar cliente</h2>
+        <p className="text-sm text-cs-text-secondary">O acesso fica vinculado à conta de {client.name}.</p>
+        {!link ? <>
+          <label className="block text-sm text-cs-text-secondary">Nome<input className={input} value={name} onChange={event => setName(event.target.value)} autoFocus required /></label>
+          <label className="block text-sm text-cs-text-secondary">E-mail<input className={input} type="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+          <button type="submit" disabled={saving} className="rounded-lg bg-cs-primary px-4 py-2 text-sm font-semibold text-black">{saving ? 'Gerando…' : 'Gerar link de convite'}</button>
+        </> : <div className="space-y-2">
+          <label className="block text-sm text-cs-text-secondary">Link de convite<input className={input} readOnly value={link} onFocus={event => event.target.select()} /></label>
+          <button type="button" onClick={copy} className="rounded-lg bg-cs-primary px-4 py-2 text-sm font-semibold text-black">Copiar convite</button>
+        </div>}
+        {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+        <button type="button" onClick={onClose} className="block text-sm text-cs-text-secondary underline">Fechar</button>
+      </form>
     </div>
   );
 }
@@ -628,10 +685,13 @@ function ApprovalsTab({ client }) {
   const activeReviewTasks = clientTasks.filter(t => t.status === 'aguardando-cliente' || t.status === 'revisao-interna' || t.status === 'ajustes');
   const displayTasks = activeReviewTasks.length > 0 ? activeReviewTasks : clientTasks;
 
-  const handleCopyLink = (taskId) => {
-    const link = `${window.location.origin}/aprovar/${taskId || clientTasks[0]?.id || 'demo'}`;
-    navigator.clipboard.writeText(link);
-    toast.success('Link mágico de aprovação copiado para o WhatsApp!');
+  const handleCopyLink = async (taskId) => {
+    try {
+      await copyApprovalUrl(taskId);
+      toast.success('Link de aprovação copiado.');
+    } catch {
+      toast.error('Não foi possível copiar o link.');
+    }
   };
 
   const currentTask = clientTasks.find(t => t.id === selectedTaskId) || displayTasks[0];
@@ -643,14 +703,8 @@ function ApprovalsTab({ client }) {
           <h3 className="text-white font-bold text-lg mb-1 flex items-center gap-2">
             <CheckCircle2 size={20} className="text-cs-primary" /> Review Center do Cliente
           </h3>
-          <p className="text-cs-text-secondary text-xs">Histórico de versões, aprovações com 1 clique e links públicos para o cliente.</p>
+          <p className="text-cs-text-secondary text-xs">Envie versões e consulte o histórico de decisões do cliente.</p>
         </div>
-        <button 
-          onClick={() => handleCopyLink(currentTask?.id)} 
-          className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-2"
-        >
-          <Copy size={14} /> COPIAR LINK MÁGICO DO CLIENTE
-        </button>
       </div>
       
       {displayTasks.length === 0 ? (
@@ -684,13 +738,13 @@ function ApprovalsTab({ client }) {
                   )}>
                     {t.status}
                   </span>
-                  <button
+                  {t.status === 'aguardando-cliente' && <button
                     onClick={(e) => { e.stopPropagation(); handleCopyLink(t.id); }}
                     className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1"
                     title="Copiar Link de Aprovação"
                   >
                     <ExternalLink size={12} />
-                  </button>
+                  </button>}
                 </div>
                 <h5 className="text-sm font-bold text-white mb-1 line-clamp-1">{t.title}</h5>
                 <p className="text-[10px] text-cs-text-secondary">{t.tag || 'Social Media'} • {t.deadline ? new Date(t.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</p>

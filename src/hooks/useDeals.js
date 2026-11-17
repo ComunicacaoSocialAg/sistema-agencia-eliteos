@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, db, isFirebaseConfigured } from '../lib/firebase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { operationId } from '../lib/operationId';
 
 const DEFAULT_DEMO_DEALS = [
   {
@@ -215,7 +216,7 @@ function getStoredDeals() {
       return DEFAULT_DEMO_DEALS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_DEMO_DEALS;
+    return Array.isArray(parsed) ? parsed : DEFAULT_DEMO_DEALS;
   } catch {
     return DEFAULT_DEMO_DEALS;
   }
@@ -229,41 +230,65 @@ function saveStoredDeals(items) {
   }
 }
 
-export function useDeals() {
-  const [deals, setDeals] = useState(getStoredDeals);
+const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const DEAL_FIELDS = ['company', 'contact', 'value', 'probability', 'status', 'assigned_to', 'notes', 'contact_email', 'contact_phone', 'next_action', 'follow_up_on'];
+const dealFields = input => Object.fromEntries(DEAL_FIELDS.filter(key => input[key] !== undefined)
+  .map(key => [key, key === 'follow_up_on' ? input[key] || null : input[key]]));
+
+export function useDeals(enabled = true) {
+  const { isDemoMode, user, profile, role } = useAuth();
+  const serverMode = isSupabaseConfigured && !isDemoMode && !user?.id?.startsWith('demo-');
+  const canWrite = serverMode && enabled && ['admin', 'commercial'].includes(role) && Boolean(user?.id && user.id === profile?.id);
+  const [deals, setDeals] = useState(() => enabled && !serverMode ? getStoredDeals() : []);
+  const [error, setError] = useState('');
+
+  const saveDeal = (deal) => {
+    if (serverMode) {
+      setDeals(current => [deal, ...current.filter(item => item.id !== deal.id)]);
+      window.dispatchEvent(new Event('csag:deals-changed'));
+      return;
+    }
+    const items = getStoredDeals();
+    const next = items.some(item => item.id === deal.id)
+      ? items.map(item => item.id === deal.id ? deal : item)
+      : [deal, ...items];
+    saveStoredDeals(next);
+    setDeals(next);
+    window.dispatchEvent(new Event('csag:deals-changed'));
+  };
   const [loading, setLoading] = useState(true);
 
   const fetchSupabaseDeals = useCallback(async () => {
-    if (!isSupabaseConfigured || !supabase) return false;
+    if (!canWrite || !supabase) return false;
     try {
       const { data, error } = await supabase
         .from('deals')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
-        setDeals(data);
-        saveStoredDeals(data);
+      if (!error && data) {
+        const legacy = getStoredDeals().filter(deal => !UUID.test(deal.id)
+          && !DEFAULT_DEMO_DEALS.some(example => example.id === deal.id));
+        setDeals([...data, ...legacy.map(deal => ({ ...deal, localOnly: true }))]);
+        setError('');
         setLoading(false);
         return true;
       }
     } catch (err) {
       console.warn('[Supabase] Erro ao buscar deals:', err);
     }
+    setError('Não foi possível carregar o CRM. Confira a conexão e tente novamente.');
+    setLoading(false);
     return false;
-  }, []);
+  }, [canWrite]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    if (isSupabaseConfigured && supabase) {
-      fetchSupabaseDeals().then(success => {
-        if (!success && isMounted) {
-          setDeals(getStoredDeals());
-          setLoading(false);
-        }
-      });
-      return;
+    if (!enabled) return;
+    if (serverMode) {
+      if (!canWrite) return;
+      fetchSupabaseDeals();
+      window.addEventListener('csag:deals-changed', fetchSupabaseDeals);
+      return () => window.removeEventListener('csag:deals-changed', fetchSupabaseDeals);
     }
 
     if (isFirebaseConfigured && db) {
@@ -287,155 +312,133 @@ export function useDeals() {
     setDeals(getStoredDeals());
     setLoading(false);
 
-    return () => { isMounted = false; };
-  }, [fetchSupabaseDeals]);
+    const sync = () => setDeals(getStoredDeals());
+    window.addEventListener('csag:deals-changed', sync);
+    return () => window.removeEventListener('csag:deals-changed', sync);
+  }, [canWrite, enabled, fetchSupabaseDeals, serverMode]);
 
-  const moveDeal = async (dealId, newStatus) => {
-    const current = getStoredDeals();
-    const updated = current.map(d => d.id === dealId ? { ...d, status: newStatus } : d);
-    saveStoredDeals(updated);
-    setDeals(updated);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('deals').update({ status: newStatus }).eq('id', dealId);
-        toast.success('Estágio do negócio atualizado no Funil!');
-      } catch (err) {
-        console.warn('Erro ao atualizar no Supabase:', err);
-      }
-      return;
-    }
-
-    if (!isFirebaseConfigured || !db) {
-      toast.success('Estágio do negócio atualizado no Funil!');
-      return;
-    }
-
+  const closeDeal = async (dealId, existingClientId) => {
+    if (!canWrite || !UUID.test(dealId)) return null;
     try {
-      await updateDoc(doc(db, 'deals', dealId), { status: newStatus });
-      toast.success('Estágio do negócio atualizado');
-    } catch (e) {
-      console.warn('Erro ao atualizar no Firebase:', e);
+      const { data, error } = await supabase.rpc('close_agency_deal', {
+        p_deal_id: dealId,
+        p_existing_client: existingClientId || null,
+      });
+      const result = Array.isArray(data) ? data[0] : data;
+      if (error || !result?.onboarding_task_id) throw error;
+      saveDeal(result);
+      return result;
+    } catch {
+      toast.error('O fechamento não foi confirmado. Tente novamente.');
+      return null;
     }
   };
 
+  const moveDeal = (dealId, status) => updateDeal(dealId, { status });
+
   const createDeal = async (dealData) => {
-    const newDeal = {
+    let deal = {
       ...dealData,
-      id: dealData.id || `deal-${Date.now()}`,
-      created_at: new Date().toISOString()
+      id: dealData.id || `deal-${crypto.randomUUID()}`,
+      created_at: new Date().toISOString(),
     };
-
-    const current = getStoredDeals();
-    const updated = [newDeal, ...current];
-    saveStoredDeals(updated);
-    setDeals(updated);
-
-    toast.success('Novo negócio adicionado ao CRM!');
-
-    if (isSupabaseConfigured && supabase) {
+    if (serverMode) {
+      if (!canWrite) return null;
       try {
-        const { data, error } = await supabase.from('deals').insert([newDeal]).select().single();
-        if (!error && data) {
-          newDeal.id = data.id;
+        const table = supabase.from('deals');
+        const values = dealFields(deal);
+        const operation = UUID.test(deal.id)
+          ? table.upsert({ ...values, id: deal.id }, { ignoreDuplicates: true }) : table.insert(values);
+        let result = await operation.select().maybeSingle();
+        if (!result.error && !result.data && UUID.test(deal.id)) {
+          result = await supabase.from('deals').select('*').eq('id', deal.id).single();
         }
-      } catch (err) {
-        console.warn('Erro ao salvar no Supabase:', err);
+        if (result.error || !result.data) throw result.error;
+        deal = result.data;
+      } catch {
+        toast.error('Não foi possível salvar o negócio. Confira a conexão e tente novamente.');
+        return null;
       }
-      return newDeal;
-    }
-
-    if (!isFirebaseConfigured || !db) {
-      return newDeal;
-    }
-
-    try {
+    } else if (isFirebaseConfigured && db) {
       const docRef = doc(collection(db, 'deals'));
-      newDeal.id = docRef.id;
-      await setDoc(docRef, newDeal);
-      return newDeal;
-    } catch (e) {
-      console.warn('Erro ao adicionar no Firebase:', e);
-      return newDeal;
+      deal.id = docRef.id;
+      await setDoc(docRef, deal);
     }
+    saveDeal(deal);
+    toast.success('Negócio salvo no CRM.');
+    return deal;
   };
 
   const deleteDeal = async (dealId) => {
-    const current = getStoredDeals();
-    const updated = current.filter(d => d.id !== dealId);
-    saveStoredDeals(updated);
-    setDeals(updated);
-
-    toast.success('Negócio removido do CRM.');
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('deals').delete().eq('id', dealId);
-      } catch (err) {
-        console.warn('Erro ao remover no Supabase:', err);
-      }
-      return;
-    }
-
-    if (!isFirebaseConfigured || !db) {
-      return;
-    }
-
+    if (serverMode && (!canWrite || !UUID.test(dealId))) return false;
     try {
-      await deleteDoc(doc(db, 'deals', dealId));
-    } catch (e) {
-      console.warn('Erro ao remover no Firebase:', e);
+      if (serverMode) {
+        const { data, error } = await supabase.from('deals').delete().eq('id', dealId).select('id').single();
+        if (error || !data) throw error;
+      } else if (isFirebaseConfigured && db) {
+        await deleteDoc(doc(db, 'deals', dealId));
+      }
+    } catch {
+      toast.error('O negócio não foi removido. Tente novamente.');
+      return false;
+    }
+    if (!serverMode) saveStoredDeals(getStoredDeals().filter(deal => deal.id !== dealId));
+    setDeals(items => items.filter(deal => deal.id !== dealId));
+    window.dispatchEvent(new Event('csag:deals-changed'));
+    return true;
+  };
+
+  const updateDeal = async (dealId, changes) => {
+    const deal = deals.find(item => item.id === dealId);
+    if (!deal || (serverMode && (!canWrite || !UUID.test(dealId)))) return false;
+    try {
+      if (serverMode) {
+        const { data, error } = await supabase.from('deals').update(dealFields(changes))
+          .eq('id', dealId).select().single();
+        if (error || !data) throw error;
+        saveDeal(data);
+      } else {
+        if (isFirebaseConfigured && db) await updateDoc(doc(db, 'deals', dealId), changes);
+        saveDeal({ ...deal, ...changes });
+      }
+      return true;
+    } catch {
+      toast.error('As alterações do negócio não foram salvas. Tente novamente.');
+      return false;
     }
   };
 
-  const updateDeal = async (dealId, updatedData) => {
-    const current = getStoredDeals();
-    const updated = current.map(d => d.id === dealId ? { ...d, ...updatedData } : d);
-    saveStoredDeals(updated);
-    setDeals(updated);
-
-    toast.success('Negócio atualizado com sucesso!');
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase.from('deals').update(updatedData).eq('id', dealId);
-        if (error) console.warn('Erro ao atualizar no Supabase:', error.message);
-      } catch (err) {
-        console.warn('Erro ao atualizar no Supabase:', err);
-      }
-      return;
-    }
-
-    if (!isFirebaseConfigured || !db) {
-      return;
-    }
-
-    try {
-      await updateDoc(doc(db, 'deals', dealId), updatedData);
-    } catch (e) {
-      console.warn('Erro ao atualizar no Firebase:', e);
-    }
+  const importDeal = async (deal) => {
+    const id = await operationId('crm-registro-local-' + deal.id, true);
+    const saved = await createDeal({ ...deal, id, status: deal.status === 'ganho' ? 'negociacao' : deal.status });
+    if (!saved) return null;
+    saveStoredDeals(getStoredDeals().filter(item => item.id !== deal.id));
+    await fetchSupabaseDeals();
+    return saved;
   };
 
   const restoreDeal = async (deal) => {
-    if (!deal) return;
-    const current = getStoredDeals();
-    if (current.some(d => d.id === deal.id)) return;
-    const updated = [deal, ...current];
-    saveStoredDeals(updated);
-    setDeals(updated);
-    toast.success(`Prospect "${deal.company}" restaurado no CRM!`);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('deals').upsert([deal]);
-      } catch (err) {
-        console.warn('Erro ao restaurar no Supabase:', err);
+    if (!deal) return false;
+    try {
+      if (serverMode) {
+        if (!canWrite || !UUID.test(deal.id)) return false;
+        const { data, error } = await supabase.from('deals').insert(deal).select().single();
+        if (error || !data) throw error;
+        saveDeal(data);
+      } else {
+        if (isFirebaseConfigured && db) await setDoc(doc(db, 'deals', deal.id), deal);
+        saveDeal(deal);
       }
+      toast.success('Negócio restaurado.');
+      return true;
+    } catch {
+      toast.error('Não foi possível restaurar o negócio.');
+      return false;
     }
   };
 
   const restoreMissingDefaults = async () => {
+    if (serverMode) return;
     const current = getStoredDeals();
     const missing = DEFAULT_DEMO_DEALS.filter(def => !current.some(c => c.company === def.company || c.id === def.id));
     if (missing.length === 0) {
@@ -447,24 +450,13 @@ export function useDeals() {
     setDeals(updated);
     toast.success(`${missing.length} prospect(s) restaurado(s) com sucesso!`);
 
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('deals').upsert(missing);
-      } catch (err) {
-        console.warn('Erro ao restaurar no Supabase:', err);
-      }
-    }
+    window.dispatchEvent(new Event('csag:deals-changed'));
   };
 
-  return { 
-    deals, 
-    loading, 
-    moveDeal, 
-    createDeal, 
-    updateDeal, 
-    deleteDeal, 
-    restoreDeal, 
-    restoreMissingDefaults, 
-    refetch: fetchSupabaseDeals 
+  return {
+    deals: enabled && (!serverMode || canWrite) ? deals : [],
+    loading: enabled && (!serverMode || canWrite) && loading,
+    error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal,
+    deleteDeal, restoreDeal, restoreMissingDefaults, refetch: fetchSupabaseDeals,
   };
 }

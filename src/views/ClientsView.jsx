@@ -1,3 +1,4 @@
+import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { 
   Users, 
@@ -213,6 +214,7 @@ function ProjectGridCard({ project, onStatusChange, onDelete }) {
 
 function NewClientModal({ onClose, onSave }) {
   const [activeTab, setActiveTab] = useState('geral');
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '',
     document_id: '',
@@ -370,10 +372,13 @@ function NewClientModal({ onClose, onSave }) {
         <div className="p-6 border-t border-cs-border bg-cs-bg/50 flex items-center justify-between shrink-0">
           <button type="button" onClick={onClose} className="px-5 py-2.5 text-xs font-bold text-cs-text-secondary hover:text-white uppercase tracking-wider">Cancelar</button>
           <button 
-            onClick={() => {
+            disabled={saving}
+            onClick={async () => {
               if (!form.name.trim()) return;
-              onSave(form);
-              onClose();
+              if (saving) return;
+              setSaving(true);
+              try { if (await onSave(form)) onClose(); }
+              finally { setSaving(false); }
             }}
             className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-xl shadow-cs-primary/20 cursor-pointer"
           >
@@ -386,8 +391,9 @@ function NewClientModal({ onClose, onSave }) {
 }
 
 export default function ClientsView() {
-  const { clients, loading: clientsLoading, totalMRR, createClient, updateClient } = useClients();
-  const { projects, loading: projectsLoading, createProject, updateProject, deleteProject } = useProjects();
+  const { role, isDemoMode } = useAuth();
+  const { clients, loading: clientsLoading, error: clientsError, refetch: refreshClients, totalMRR, createClient, updateClient } = useClients();
+  const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects, remote: remoteProjects, createProject, updateProject, deleteProject } = useProjects();
   const { tasks, createTask } = useTasks();
   const { deliverables } = useAllDeliverables();
   const { createDeal } = useDeals();
@@ -467,6 +473,7 @@ export default function ClientsView() {
 
   const handleConvertRegistrationToClient = async (reg) => {
     const clientPayload = {
+      id: reg.id,
       name: reg.trade_name || reg.company_name,
       document_id: reg.document_number,
       contact_name: reg.representative_name,
@@ -477,14 +484,12 @@ export default function ClientsView() {
       billing_day: reg.billing_day || '10',
       status: 'active',
       lifecycle_stage: 'onboarding',
-      tone_of_voice: `Empresa: ${reg.company_name}. Ramo e identidade em definição inicial.`,
-      target_audience: 'Público e personas em definição inicial.',
-      value_proposition: reg.observations || 'Início de contrato e onboarding de comunicação.',
+      notes: reg.observations || '',
       reportei_config: {
         instagram_handle: reg.instagram_handle || ''
       }
     };
-    await handleCreateClient(clientPayload);
+    return createClient(clientPayload, { handoff: true });
   };
 
   const handleInjectTestData = async () => {
@@ -529,7 +534,7 @@ export default function ClientsView() {
     } catch (err) {
       console.warn('Google Drive não configurado ou erro ao criar pasta do cliente:', err);
     }
-    await createClient(clientData);
+    return createClient(clientData);
   };
 
   const handleCreateProject = async (projectData) => {
@@ -549,6 +554,7 @@ export default function ClientsView() {
     // 1. Create project
     const projDataToSave = { ...projectData, drive_folder_url: driveUrl };
     const proj = await createProject(projDataToSave);
+    if (!proj || remoteProjects) return proj;
     
     // 2. If it has tasks, create them in useTasks
     if (projectData.tasks && projectData.tasks.length > 0) {
@@ -556,11 +562,13 @@ export default function ClientsView() {
         await createTask({
           title: t.title,
           client_id: projectData.client_id || null,
+          project_id: proj.id,
+          notes: t.description,
           client_name: projectData.client_name || 'Interno',
           tag: t.tag || 'Campanha',
           estimated_hours: t.estimated_hours || 4,
           status: t.status || 'backlog',
-          deadline: t.deadline || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          deadline: t.deadline || null,
           assigned_to: t.assigned_to || 'Bruno',
         });
       }
@@ -570,13 +578,14 @@ export default function ClientsView() {
     if (projectData.is_proposal) {
       await createDeal({
         company: projectData.client_name || 'Novo Prospect',
-        contact: 'Contato Inicial',
+        notes: projectData.name,
         value: projectData.value || 0,
         status: 'proposta',
         probability: 50,
         assigned_to: 'Bruno',
       });
     }
+    return proj;
   };
 
   const handleStatusChange = (projectId, newStatus) => {
@@ -595,6 +604,7 @@ export default function ClientsView() {
   }
 
   const isLoading = (viewTab === 'clients' ? clientsLoading : projectsLoading) && clients.length === 0;
+  const loadError = viewTab === 'clients' ? clientsError : viewTab === 'projects' ? projectsError : '';
 
   if (isLoading) {
     return (
@@ -631,12 +641,12 @@ export default function ClientsView() {
             >
               <MessageSquare size={16} /> LINK WHATSAPP (CADASTRO)
             </button>
-            <button 
+            {isDemoMode && <button 
               onClick={handleInjectTestData}
               className="bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 text-yellow-400 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
             >
               Injetar Teste
-            </button>
+            </button>}
             <button 
               onClick={() => setShowNewClientModal(true)}
               className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 text-cs-text-secondary hover:text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
@@ -934,8 +944,8 @@ export default function ClientsView() {
                       <button
                         onClick={async () => {
                           try {
-                            await handleConvertRegistrationToClient(reg);
-                            await updateRegistrationStatus(reg.id, 'convertido');
+                            if (!await handleConvertRegistrationToClient(reg)) return;
+                            if (!await updateRegistrationStatus(reg.id, 'convertido')) return;
                             toast.success(`Cliente "${reg.trade_name || reg.company_name}" adicionado ao sistema!`);
                           } catch {
                             toast.error('Erro ao adicionar cliente');
@@ -1197,6 +1207,10 @@ export default function ClientsView() {
         )}
       </div>
 
+      {loadError && <p role="alert" className="px-6 py-3 text-sm text-red-300">
+        {loadError} <button type="button" className="underline" onClick={viewTab === 'clients' ? refreshClients : refreshProjects}>Tentar novamente</button>
+      </p>}
+
       {showNewClientModal && (
         <NewClientModal onClose={() => setShowNewClientModal(false)} onSave={handleCreateClient} />
       )}
@@ -1205,7 +1219,8 @@ export default function ClientsView() {
         <NewProjectModal 
           onClose={() => setShowNewProjectModal(false)} 
           onSave={handleCreateProject} 
-          clients={clients} 
+          clients={clients}
+          allowProposal={role !== 'production'}
         />
       )}
 

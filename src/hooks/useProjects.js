@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useTasks } from './useTasks';
+import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, db, isFirebaseConfigured } from '../lib/firebase';
 
 const DEFAULT_DEMO_PROJECTS = [
   {
@@ -77,11 +79,12 @@ function saveStoredProjects(items) {
   }
 }
 
-export function useProjects() {
-  const [projects, setProjects] = useState(getStoredProjects);
+function useDemoProjects(enabled) {
+  const [projects, setProjects] = useState(() => enabled ? getStoredProjects() : []);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!enabled) return;
     if (!isFirebaseConfigured || !db) {
       setProjects(getStoredProjects());
       setLoading(false);
@@ -103,7 +106,7 @@ export function useProjects() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [enabled]);
 
   const createProject = useCallback(async (projectData) => {
     const newProject = {
@@ -204,5 +207,88 @@ export function useProjects() {
     updateProject,
     deleteProject,
     updateProjectDriveFolderUrl,
+  };
+}
+
+const PROJECTS_EVENT = 'csag:projects-changed';
+
+export function useProjects() {
+  const { role, isDemoMode } = useAuth();
+  const remote = isSupabaseConfigured && !isDemoMode;
+  const enabled = remote && ['admin', 'commercial', 'production'].includes(role);
+  const demo = useDemoProjects(!remote);
+  const { allTasks, refresh: refreshTasks } = useTasks();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(enabled);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    if (!enabled) return;
+    try {
+      const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setRows(data);
+      setError('');
+    } catch {
+      setError('Não foi possível carregar os projetos.');
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    refresh();
+    window.addEventListener(PROJECTS_EVENT, refresh);
+    return () => window.removeEventListener(PROJECTS_EVENT, refresh);
+  }, [enabled, refresh]);
+
+  async function createProject(project) {
+    if (!enabled) return null;
+    const { id, tasks, ...fields } = project;
+    try {
+      const { data, error } = await supabase.rpc('create_agency_project', {
+        p_id: id, p_project: fields, p_tasks: tasks,
+      });
+      const result = Array.isArray(data) ? data[0] : data;
+      if (error || !result?.id) throw error;
+      window.dispatchEvent(new Event(PROJECTS_EVENT));
+      if (project.is_proposal) window.dispatchEvent(new Event('csag:deals-changed'));
+      await refreshTasks();
+      toast.success('Projeto e tarefas registrados.');
+      return result;
+    } catch (error) {
+      toast.error(error?.code === '42501' ? 'Sua conta não tem acesso para criar este projeto.' :
+        'Não foi possível salvar o projeto. Confira os dados e tente novamente.');
+      return null;
+    }
+  }
+
+  async function changeProject(id, fields) {
+    if (!enabled) return false;
+    try {
+      const table = supabase.from('projects');
+      const operation = fields ? table.update(fields) : table.delete();
+      const { data, error } = await operation.eq('id', id).select('id').single();
+      if (error || !data) throw error;
+      window.dispatchEvent(new Event(PROJECTS_EVENT));
+      toast.success(fields ? 'Projeto atualizado.' : 'Projeto removido.');
+      return true;
+    } catch {
+      toast.error('A mudança no projeto não foi confirmada.');
+      return false;
+    }
+  }
+
+  if (!remote) return demo;
+  const projects = enabled ? rows.map(project => {
+    const tasks = allTasks.filter(task => task.project_id === project.id);
+    return { ...project, task_count: tasks.length, tasks_done: tasks.filter(task => task.status === 'concluido').length };
+  }) : [];
+  return {
+    projects, remote, loading: enabled && loading, error, refresh, createProject,
+    updateProject: ({ id, status }) => changeProject(id, { status }),
+    updateProjectDriveFolderUrl: (id, url) => changeProject(id, { drive_folder_url: url }),
+    deleteProject: id => window.confirm('Remover o projeto? As tarefas continuam em Produção.') && changeProject(id, null),
   };
 }
