@@ -10,14 +10,19 @@ export function useTeam() {
   const [loading, setLoading] = useState(true);
 
   const fetchTeam = useCallback(async () => {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !supabase) {
       setLoading(false);
       return;
     }
 
-    const { data } = await supabase.from('team_members').select('*').eq('is_active', true);
-    if (data) setTeam(data);
-    setLoading(false);
+    try {
+      const { data } = await supabase.from('team_members').select('*').eq('is_active', true);
+      if (data) setTeam(data);
+    } catch {
+      // mantém fallback seguro da equipe
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

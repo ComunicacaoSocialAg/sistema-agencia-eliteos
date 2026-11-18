@@ -1,5 +1,5 @@
 // ============================================================
-// CS Ag OS — Edge Function: ai-chat
+// CS Ag OS : Edge Function: ai-chat
 // Proxy autenticado para Gemini / OpenAI.
 //
 // Por que isso existe: antes, VITE_GEMINI_API_KEY e VITE_OPENAI_API_KEY
@@ -22,6 +22,7 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,28 +52,34 @@ async function callGemini(
     { role: "user", parts: [{ text: userMessage }] },
   ];
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-      }),
-    },
-  );
+  let lastError = "Gemini indisponível";
+  for (const model of GEMINI_MODELS) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+        }),
+      },
+    );
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Gemini HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      lastError = err.error?.message || `Gemini ${model} HTTP ${res.status}`;
+      continue;
+    }
+
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts || [])
+      .map((p: { text?: string }) => p.text || "")
+      .join("");
+    if (text) return text;
   }
 
-  const data = await res.json();
-  const text = (data.candidates?.[0]?.content?.parts || [])
-    .map((p: { text?: string }) => p.text || "")
-    .join("");
-  return text;
+  throw new Error(lastError);
 }
 
 async function callOpenAI(

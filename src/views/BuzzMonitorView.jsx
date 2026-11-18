@@ -268,7 +268,7 @@ Seja direto e prático.`;
       </header>
 
       {/* Conteúdo Principal */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-6 pb-24 custom-scrollbar">
         {/* ABA 1: GRADE EDITORIAL */}
         {activeTab === 'grade' && (
           <div className="space-y-4">

@@ -3,6 +3,7 @@ import { X, Building2, CircleDollarSign, Share2, Bot, Save, Palette } from 'luci
 import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
 import { buildClientBrandPayload, getClientBrandKit, normalizeHexColor } from '../lib/brandKit';
+import { LIFECYCLE_STAGE_META as LIFECYCLE_STAGES, normalizeLifecycleStage } from '../lib/lifecycle';
 
 export default function ClientConfigModal({ client, onClose, onSave }) {
   const brandKit = getClientBrandKit(client);
@@ -36,7 +37,7 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
     strategic_goals: client.strategic_goals || '',
     ai_instructions: client.ai_instructions || '',
     status: client.status || 'active',
-    lifecycle_stage: client.lifecycle_stage || 'onboarding',
+    lifecycle_stage: normalizeLifecycleStage(client.lifecycle_stage || 'onboarding'),
   });
 
   const setField = (field, value) => {
@@ -175,11 +176,9 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                     onChange={(e) => setField('lifecycle_stage', e.target.value)}
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
                   >
-                    <option value="onboarding">Onboarding / Setup</option>
-                    <option value="estrategia">Estratégia & Planejamento</option>
-                    <option value="producao">Produção Ativa</option>
-                    <option value="performance">Escala & Performance</option>
-                    <option value="retencao">Retenção / Renovação</option>
+                    {LIFECYCLE_STAGES.map(stage => (
+                      <option key={stage.id} value={stage.id}>{stage.label} ({stage.description})</option>
+                    ))}
                   </select>
                 </div>
               </div>

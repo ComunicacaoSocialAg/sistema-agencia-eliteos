@@ -136,7 +136,7 @@ export default function FocusActionView() {
     `https://drive.google.com/drive/u/0/search?q=${encodeURIComponent(currentClient?.name || 'CS Ag')}`;
 
   return (
-    <div className="h-full overflow-y-auto bg-[#090b0e] text-[#f1f3f7] p-6 lg:p-10 font-sans selection:bg-amber-500/20">
+    <div className="h-full overflow-y-auto bg-[#090b0e] text-[#f1f3f7] p-6 lg:p-10 pb-24 font-sans selection:bg-amber-500/20">
       <div className="max-w-5xl mx-auto space-y-8 pb-16">
         <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-[#1c222c] gap-4">
           <div>

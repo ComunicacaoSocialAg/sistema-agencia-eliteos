@@ -97,7 +97,7 @@ export default function ReportsView() {
   const ready = Boolean(selectedClient && period && !loading && !missingData);
 
   return (
-    <section className="h-full overflow-y-auto bg-cs-bg p-4 text-white sm:p-6 print:h-auto print:overflow-visible print:bg-white print:text-black">
+    <section className="h-full overflow-y-auto bg-cs-bg p-4 pb-24 text-white sm:p-6 sm:pb-24 print:h-auto print:overflow-visible print:bg-white print:text-black">
       <div className="mx-auto max-w-4xl space-y-5">
         <header className="space-y-4">
           <h1 className="flex items-center gap-2 text-xl font-bold"><FileText size={20} /> Relatório mensal</h1>

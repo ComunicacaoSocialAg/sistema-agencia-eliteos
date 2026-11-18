@@ -77,7 +77,10 @@ export default function ManagementView() {
   const stats = useMemo(() => {
     const activeClients = clients.filter(c => c.status === 'active');
     const totalRevenue = activeClients.reduce((acc, c) => acc + (Number(c.monthly_fee) || 0), 0);
-    const totalProfit = profitability.reduce((acc, p) => acc + (Number(p.profit) ?? (Number(p.revenue || 0) - Number(p.costHours || 0))), 0);
+    const totalProfit = profitability.reduce(
+      (acc, p) => acc + (p.profit !== undefined && p.profit !== null ? Number(p.profit) : (Number(p.revenue || 0) - Number(p.costHours || 0))),
+      0
+    );
     const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
     const totalTasks = tasks.length;
     const doneTasks = tasks.filter(t => t.status === 'concluido').length;
@@ -127,7 +130,7 @@ export default function ManagementView() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-cs-bg p-8 overflow-y-auto custom-scrollbar">
+    <div className="h-full flex flex-col bg-cs-bg p-6 sm:p-8 pb-24 overflow-y-auto custom-scrollbar">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h2 className="text-3xl font-bold text-white mb-1">Painel de Gestão 360</h2>

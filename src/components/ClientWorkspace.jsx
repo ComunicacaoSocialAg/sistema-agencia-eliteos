@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Kanban,
@@ -63,12 +63,18 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const selectedTask = tasks.find(t => t.id === selectedTaskId) || null;
+  const prevClientIdRef = useRef(initialClient?.id);
+  const prevInitialTabRef = useRef(initialTab);
 
   useEffect(() => {
     setClient(initialClient);
-    if (initialTab) {
+    const clientChanged = prevClientIdRef.current !== initialClient?.id;
+    const initialTabChanged = prevInitialTabRef.current !== initialTab;
+    if ((clientChanged || initialTabChanged) && initialTab) {
       setActiveTab(initialTab);
     }
+    prevClientIdRef.current = initialClient?.id;
+    prevInitialTabRef.current = initialTab;
   }, [initialClient, initialTab]);
 
   const handleUpdateClient = async (updatedClient) => {
@@ -165,20 +171,20 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
   return (
     <div className="flex flex-col h-full bg-cs-bg animate-in fade-in slide-in-from-right-4 duration-500">
       {/* Header */}
-      <div className="bg-cs-surface border-b border-cs-border px-6 sm:px-8 py-6 shrink-0">
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-4">
+      <div className="bg-cs-surface border-b border-cs-border px-4 sm:px-8 py-5 shrink-0">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-5">
+          <div className="flex items-center gap-3.5 min-w-0 flex-1">
             {!isPortal && (
               <button
                 type="button"
                 onClick={onBack}
-                className="p-2 hover:bg-cs-bg border border-cs-border rounded-lg text-cs-text-secondary hover:text-white transition-colors cursor-pointer"
+                className="p-2 hover:bg-cs-bg border border-cs-border rounded-lg text-cs-text-secondary hover:text-white transition-colors cursor-pointer shrink-0"
               >
                 <ArrowLeft size={18} />
               </button>
             )}
             <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg overflow-hidden"
+              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg overflow-hidden shrink-0"
               style={{ backgroundColor: brandKit.primary_color }}
             >
               {brandKit.logo_url && /^https?:\/\//i.test(brandKit.logo_url) ? (
@@ -187,38 +193,38 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
                 client?.name ? client.name.charAt(0) : 'C'
               )}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl sm:text-2xl font-bold text-white">{client?.name || 'Cliente'}</h2>
-                <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20 uppercase">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg sm:text-2xl font-bold text-white leading-tight break-words">{client?.name || 'Cliente'}</h2>
+                <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20 uppercase shrink-0">
                   {client?.status === 'inactive' ? 'Inativo' : 'Ativo'}
                 </span>
               </div>
-              <p className="text-cs-text-secondary text-xs sm:text-sm">
+              <p className="text-cs-text-secondary text-xs sm:text-sm truncate">
                 {client?.contact_name || 'Sem contato'} {client?.contact_email ? `• ${client.contact_email}` : ''}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             {!isPortal && (
               <>
                 <button
                   type="button"
                   onClick={handleGenerateWhatsAppReport}
-                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <MessageSquare size={15} /> Relatório WhatsApp
                 </button>
                 {role === 'admin' && !isDemoMode && (
-                  <button type="button" onClick={() => setShowInvite(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer">
+                  <button type="button" onClick={() => setShowInvite(true)} className="bg-cs-surface-hover border border-cs-border text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer whitespace-nowrap shrink-0">
                     Convidar cliente
                   </button>
                 )}
-                <button type="button" onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer">
+                <button type="button" onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0">
                   <Settings size={15} /> Configurar
                 </button>
-                <button type="button" onClick={() => setShowNewDemand(true)} className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-colors flex items-center gap-2 shadow-lg shadow-cs-primary/20 cursor-pointer">
+                <button type="button" onClick={() => setShowNewDemand(true)} className="bg-cs-primary hover:bg-cs-primary-hover text-black px-3.5 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-colors flex items-center gap-2 shadow-lg shadow-cs-primary/20 cursor-pointer whitespace-nowrap shrink-0">
                   <Plus size={15} /> Nova Demanda
                 </button>
               </>
@@ -227,16 +233,16 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         </div>
 
         {/* Tabs Navigation */}
-        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all relative whitespace-nowrap cursor-pointer',
+                'flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all relative whitespace-nowrap shrink-0 cursor-pointer',
                 activeTab === tab.id
-                  ? 'text-cs-primary bg-cs-primary/5'
+                  ? 'text-cs-primary bg-cs-primary/10 font-bold'
                   : 'text-cs-text-secondary hover:text-white hover:bg-cs-bg'
               )}
             >
@@ -251,7 +257,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 sm:p-8 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8 pb-24 custom-scrollbar">
         {activeTab === 'overview' && (
           <>
             <ClientLifecycle
@@ -290,7 +296,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         )}
         {activeTab === 'reports' && <ClientReportsTab client={client} tasks={tasks} />}
         {activeTab === 'approvals' && <ApprovalsTab client={client} />}
-        {activeTab === 'assets' && <AssetsTab client={client} />}
+        {activeTab === 'assets' && <AssetsTab client={client} onOpenBrand={!isPortal ? () => setActiveTab('brand') : undefined} />}
         {activeTab === 'brain' && !isPortal && <AIBrainModule client={client} />}
         {activeTab === 'profitability' && !isPortal && <ProfitabilityTab client={client} tasks={tasks} />}
         {activeTab === 'vault' && <VaultTab client={client} />}
@@ -802,7 +808,7 @@ function ApprovalsTab({ client }) {
   );
 }
 
-function AssetsTab({ client }) {
+function AssetsTab({ client, onOpenBrand }) {
   const kit = getClientBrandKit(client);
   const instagramClean = (kit.instagram || '').replace(/^@/, '').trim();
   const instagramUrl = instagramClean ? `https://instagram.com/${instagramClean}` : '';
@@ -879,9 +885,20 @@ function AssetsTab({ client }) {
               ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
             </a>
           ) : (
-            <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
-              Nenhum link do Google Drive cadastrado ainda. Adicione na aba Brand Kit ou no Onboarding.
-            </p>
+            <div className="space-y-3 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5">
+              <p className="text-xs text-amber-300">
+                Nenhum link do Google Drive cadastrado ainda para esta conta.
+              </p>
+              {onOpenBrand && (
+                <button
+                  type="button"
+                  onClick={onOpenBrand}
+                  className="bg-cs-primary hover:bg-cs-primary-hover text-black px-3.5 py-2 rounded-lg text-xs font-extrabold cursor-pointer"
+                >
+                  Configurar Link do Drive no Brand Kit
+                </button>
+              )}
+            </div>
           )}
         </div>
       </section>

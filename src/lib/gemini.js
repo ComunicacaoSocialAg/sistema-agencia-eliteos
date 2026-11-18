@@ -75,25 +75,29 @@ async function callDirectGemini(systemPrompt, conversationHistory = [], userMess
     parts: [{ text: systemPrompt ? `${systemPrompt}\n\nSolicitação:\n${userMessage}` : userMessage }]
   });
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
-      })
+  let lastError = 'Gemini indisponível';
+  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+        })
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      lastError = err?.error?.message || `Gemini ${model} HTTP ${res.status}`;
+      continue;
     }
-  );
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Gemini HTTP ${res.status}`);
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (text) return sanitizeNoEmDash(text);
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Resposta vazia do Gemini');
-  return sanitizeNoEmDash(text);
+  throw new Error(lastError);
 }
 
 async function callDirectOpenAI(systemPrompt, conversationHistory = [], userMessage = '') {
@@ -248,31 +252,32 @@ export async function chatWithAgentWithSystemPrompt(systemPrompt, conversationHi
   // 3. Fallback contextual inteligente
   return {
     text: buildContextualFallback(systemPrompt, userMessage, agentId),
-    provider: 'contextual-fallback'
+    provider: 'contextual-fallback',
+    isFallback: true,
   };
 }
 
 export async function chatWithAgent(agentId, conversationHistory = [], userMessage = '', preferredProvider = 'auto') {
   const systemPrompt = AGENT_CONTEXTS[agentId] || AGENCY_CONTEXT;
   const result = await chatWithAgentWithSystemPrompt(systemPrompt, conversationHistory, userMessage, preferredProvider, agentId);
-  return parseAgentResponse(agentId, result.text, result.provider);
+  return parseAgentResponse(agentId, result.text, result.provider, Boolean(result.isFallback));
 }
 
-function parseAgentResponse(agentId, text, provider) {
+function parseAgentResponse(agentId, text, provider, isFallback = false) {
   if (agentId === 'campaign') {
     const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/);
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[1]);
         const cleanText = text.replace(/```json[\s\S]*?```/g, '').trim();
-        return { text: cleanText, tasks: parsed.tasks || [], provider };
+        return { text: cleanText, tasks: parsed.tasks || [], provider, isFallback };
       } catch {
         // fall through
       }
     }
   }
 
-  return { text, provider };
+  return { text, provider, isFallback };
 }
 
 export async function generateContent(prompt, preferredProvider = 'auto', { requireProvider = false } = {}) {

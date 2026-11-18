@@ -45,7 +45,12 @@ function MessageBubble({ msg, onAddTasksToKanban }) {
       <div className="flex-1 space-y-3">
         {msg.text && (
           <div className="bg-cs-surface border border-cs-border rounded-2xl rounded-tl-sm p-4 text-sm text-cs-text-primary whitespace-pre-wrap leading-relaxed">
-            {msg.text}
+            {(msg.isFallback || msg.provider === 'contextual-fallback') && (
+              <div className="mb-2 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                Modo contingência offline (provedor de IA indisponível)
+              </div>
+            )}
+            <div>{msg.text}</div>
           </div>
         )}
 
@@ -132,6 +137,8 @@ export default function AILayerView() {
         role: 'ai',
         text: response.text || '',
         tasks: response.tasks || null,
+        provider: response.provider,
+        isFallback: Boolean(response.isFallback),
       };
 
       setConversations(prev => {

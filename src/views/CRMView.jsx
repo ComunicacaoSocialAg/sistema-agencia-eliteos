@@ -881,7 +881,7 @@ export default function CRMView() {
         setSelectedDeal(previous => previous?.id === dealId ? closed : previous);
         window.dispatchEvent(new Event('csag:remote-clients-changed'));
         await Promise.allSettled([refreshTasks(), refreshClients()]);
-        toast.success('Negócio fechado. A próxima ação está em Produção.');
+        toast.success('Negócio fechado. Briefing em Produção e cobrança preparados.');
         return true;
       }
 
@@ -923,7 +923,7 @@ export default function CRMView() {
         }
         await updateDeal(dealId, { client_id: client.id, onboarding_task_id: task.id, status: 'ganho' });
         setSelectedDeal(previous => previous?.id === dealId ? { ...previous, status: 'ganho', client_id: client.id, onboarding_task_id: task.id } : previous);
-        toast.success('Negócio fechado. A próxima ação está em Produção.');
+        toast.success('Negócio fechado. Briefing em Produção e cobrança preparados.');
         return true;
       }
 

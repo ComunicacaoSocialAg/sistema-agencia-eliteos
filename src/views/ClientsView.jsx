@@ -753,11 +753,11 @@ export default function ClientsView({ initialClientId = null, initialClientTab =
   const crmProposals = filteredProjects.filter(p => p.is_proposal);
 
   return (
-    <div className="h-full flex flex-col bg-cs-bg overflow-y-auto custom-scrollbar">
-      <div className="p-8 pb-0 shrink-0">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+    <div className="h-full flex flex-col bg-cs-bg pb-24 overflow-y-auto custom-scrollbar">
+      <div className="p-4 sm:p-8 pb-0 shrink-0">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-3xl font-bold text-white mb-1 tracking-tight">Clientes & Projetos</h2>
+            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-1 tracking-tight">Clientes & Projetos</h2>
             <p className="text-sm text-cs-text-secondary">
               {viewTab === 'clients' 
                 ? `${clients.filter(c => c.status === 'active').length} contas sob gestão ativa.`
@@ -767,28 +767,28 @@ export default function ClientsView({ initialClientId = null, initialClientTab =
               }
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button 
               onClick={() => setShowRegistrationLinkModal(true)}
-              className="bg-[#25D366] hover:bg-[#20ba5a] text-black px-4 py-3 rounded-2xl text-xs sm:text-sm font-extrabold transition-all shadow-lg shadow-[#25D366]/20 flex items-center gap-2 cursor-pointer"
+              className="bg-[#25D366] hover:bg-[#20ba5a] text-black px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all shadow-lg shadow-[#25D366]/20 flex items-center gap-2 cursor-pointer whitespace-nowrap"
             >
               <MessageSquare size={16} /> LINK WHATSAPP (CADASTRO)
             </button>
             {isDemoMode && <button 
               onClick={handleInjectTestData}
-              className="bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 text-yellow-400 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
+              className="bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 text-yellow-400 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap"
             >
               Injetar Teste
             </button>}
             <button 
               onClick={() => setShowNewClientModal(true)}
-              className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 text-cs-text-secondary hover:text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
+              className="bg-cs-surface border border-cs-border hover:border-cs-primary/50 text-cs-text-secondary hover:text-white px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap"
             >
               <Plus size={16} /> NOVO CLIENTE
             </button>
             <button 
               onClick={() => setShowNewProjectModal(true)}
-              className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-xl shadow-cs-primary/20 flex items-center gap-2 cursor-pointer"
+              className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all shadow-xl shadow-cs-primary/20 flex items-center gap-2 cursor-pointer whitespace-nowrap"
             >
               <Plus size={16} /> NOVO PROJETO
             </button>
@@ -1379,6 +1379,7 @@ export default function ClientsView({ initialClientId = null, initialClientTab =
           onCreateClient={handleConvertRegistrationToClient}
         />
       )}
+      <div className="h-24 shrink-0" aria-hidden="true" />
     </div>
   );
 }

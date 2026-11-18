@@ -235,7 +235,7 @@ export default function PaidMediaView() {
       </header>
 
       {/* Conteúdo Principal */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 pb-24 custom-scrollbar space-y-6">
         {/* KPI Cards Reais de Orçamento */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-cs-surface border border-cs-border rounded-2xl p-4">

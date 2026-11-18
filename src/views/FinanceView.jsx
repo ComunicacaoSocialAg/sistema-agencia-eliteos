@@ -1,20 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
-  DollarSign, 
-  TrendingUp, 
-  TrendingDown, 
-  AlertCircle, 
   X, 
   Plus, 
   Target, 
-  ArrowUpRight, 
-  ArrowDownRight,
   Calendar,
   Wallet,
-  CheckCircle2
+  CheckCircle2,
+  MessageSquare,
+  RefreshCw
 } from 'lucide-react';
-import { format, parseISO, addMonths } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale/pt-BR';
+import toast from 'react-hot-toast';
 import { 
   BarChart, 
   Bar, 
@@ -23,14 +20,13 @@ import {
   CartesianGrid, 
   Tooltip as RechartsTooltip, 
   ResponsiveContainer, 
-  Cell,
-  LineChart,
-  Line
+  Cell
 } from 'recharts';
 import { useInvoices } from '../hooks/useInvoices';
 import { useProfitability } from '../hooks/useProfitability';
-import { useClients } from '../hooks/useClients';
+import { useClients, areIdsMatching } from '../hooks/useClients';
 import { useActiveClient } from '../contexts/ActiveClientContext';
+import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { cn } from '../utils/cn';
 
 function formatDate(dateStr) {
@@ -99,7 +95,7 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
               Cancelar
             </button>
             <button type="submit" disabled={saving}
-              className="flex-1 bg-cs-primary hover:bg-cs-primary-hover text-white py-2 rounded-lg text-sm font-medium transition-colors">
+              className="flex-1 bg-cs-primary hover:bg-cs-primary-hover text-black py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer">
               {saving ? 'Registrando…' : 'Registrar cobrança'}
             </button>
           </div>
@@ -111,11 +107,14 @@ function NewInvoiceModal({ onClose, onSave, clients = [] }) {
 
 export default function FinanceView() {
   const { selectedClient, isAllClients, matchesSelectedClient } = useActiveClient();
-  const { invoices, loading, error, refetch, createInvoice, updateInvoiceStatus } = useInvoices();
+  const { setContext } = useAIAssistant();
+  const { invoices, loading, error, refetch, createInvoice, updateInvoiceStatus, generateMonthlyInvoices } = useInvoices();
   const { data: profitability = [] } = useProfitability();
   const { clients = [] } = useClients();
   const [showNewModal, setShowNewModal] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState(null);
+  const [generatingBatch, setGeneratingBatch] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const handleInvoiceStatus = async (id, status) => {
     if (pendingUpdate || (status === 'cancelled' && !window.confirm('Cancelar esta cobrança?'))) return;
@@ -124,25 +123,77 @@ export default function FinanceView() {
     finally { setPendingUpdate(null); }
   };
 
+  const handleGenerateMonth = async () => {
+    if (generatingBatch) return;
+    setGeneratingBatch(true);
+    try {
+      const targetClients = isAllClients || !selectedClient ? clients : [selectedClient];
+      await generateMonthlyInvoices(targetClients);
+    } finally {
+      setGeneratingBatch(false);
+    }
+  };
+
+  const handleSendWhatsAppReminder = async (invoice) => {
+    const clientObj = clients.find(c =>
+      areIdsMatching(c.id, invoice.client_id, c.name, invoice.client?.name || invoice.client)
+    );
+    const contactName = clientObj?.contact_name || clientObj?.name || invoice.client?.name || 'parceiro';
+    const msg = `Olá, ${contactName}! Tudo bem?\n\nPassando para lembrar sobre o faturamento da Comunicação Social Ag:\n• Serviço: ${invoice.service}\n• Valor: ${formatCurrency(invoice.amount)}\n• Vencimento: ${formatDate(invoice.due_date)}\n\nCaso já tenha realizado o pagamento, por favor desconsidere ou nos envie o comprovante por aqui. Qualquer dúvida, estamos à disposição!`;
+    try {
+      await navigator.clipboard.writeText(msg);
+      toast.success('Mensagem de cobrança copiada para o WhatsApp.');
+    } catch {
+      toast.success('Mensagem preparada.');
+    }
+    const rawDigits = String(clientObj?.contact_phone || '').replace(/\D/g, '');
+    if (rawDigits.length >= 10) {
+      const phone = rawDigits.length <= 11 ? `55${rawDigits}` : rawDigits;
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const formatCurrency = (value) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
   // Filtrar faturas pelo cliente selecionado
   const displayedInvoices = useMemo(() => {
+    const byClient = isAllClients
+      ? invoices
+      : invoices.filter(i => matchesSelectedClient(i.client_id) || (i.client && matchesSelectedClient(i.client.id)));
+    if (statusFilter === 'all') return byClient;
+    return byClient.filter(i => i.status === statusFilter);
+  }, [invoices, isAllClients, matchesSelectedClient, statusFilter]);
+
+  const clientInvoicesScope = useMemo(() => {
     if (isAllClients) return invoices;
     return invoices.filter(i => matchesSelectedClient(i.client_id) || (i.client && matchesSelectedClient(i.client.id)));
   }, [invoices, isAllClients, matchesSelectedClient]);
 
   const clientFee = !isAllClients && selectedClient ? Number(selectedClient.monthly_fee || 0) : clients.filter(client => client.status === 'active').reduce((total, client) => total + (Number(client.monthly_fee) || 0), 0);
-  const clientPaid = displayedInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const clientPending = displayedInvoices.filter(i => i.status === 'pending').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const overdueCount = displayedInvoices.filter(i => i.status === 'overdue').length;
-  const displayedOverdue = displayedInvoices.filter(i => i.status === 'overdue').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const clientPaid = clientInvoicesScope.filter(i => i.status === 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const clientPending = clientInvoicesScope.filter(i => i.status === 'pending').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const overdueCount = clientInvoicesScope.filter(i => i.status === 'overdue').length;
+  const displayedOverdue = clientInvoicesScope.filter(i => i.status === 'overdue').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  useEffect(() => {
+    setContext({
+      module: 'financeiro',
+      title: selectedClient ? `Financeiro: ${selectedClient.name}` : 'Financeiro da Agência',
+      data: {
+        fee_contratado: clientFee,
+        recebido: clientPaid,
+        pendente: clientPending,
+        inadimplencia: displayedOverdue,
+        total_faturas: clientInvoicesScope.length,
+      },
+    });
+  }, [setContext, selectedClient, clientFee, clientPaid, clientPending, displayedOverdue, clientInvoicesScope.length]);
 
   // Recebíveis reais: faturas não pagas agrupadas por mês de vencimento
   const receivablesByMonth = useMemo(() => {
     const groups = {};
-    displayedInvoices
+    clientInvoicesScope
       .filter(i => ['pending', 'overdue'].includes(i.status) && i.due_date)
       .forEach(i => {
         const key = String(i.due_date).slice(0, 7);
@@ -155,23 +206,33 @@ export default function FinanceView() {
         groups[key].count += 1;
       });
     return Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
-  }, [displayedInvoices]);
+  }, [clientInvoicesScope]);
 
   return (
-    <div className="h-full flex flex-col bg-cs-bg p-8 overflow-y-auto custom-scrollbar">
+    <div className="h-full bg-cs-bg p-4 sm:p-8 pb-28 overflow-y-auto custom-scrollbar">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-1">Inteligência Financeira</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold text-white mb-1">Inteligência Financeira</h2>
           <p className="text-cs-text-secondary text-sm">
             {selectedClient 
               ? `Gestão financeira e contratos de: ${selectedClient.name}`
               : 'Visão consolidada de receitas e faturas da agência'}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
+            type="button"
+            onClick={handleGenerateMonth}
+            disabled={generatingBatch || loading}
+            className="bg-cs-surface hover:bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={generatingBatch ? 'animate-spin' : ''} />
+            {generatingBatch ? 'Gerando...' : 'Gerar Mensalidades do Mês'}
+          </button>
+          <button
+            type="button"
             onClick={() => setShowNewModal(true)}
-            className="bg-cs-primary hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-1.5"
+            className="bg-cs-primary hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-1.5 cursor-pointer"
           >
             <Plus size={16} /> Nova Cobrança
           </button>
@@ -210,29 +271,29 @@ export default function FinanceView() {
       )}
 
       {/* KPI Cards Reais */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+        <div className="bg-cs-surface border border-cs-border rounded-xl p-5 min-w-0">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">
             {selectedClient ? 'Fee Mensal Contratado' : 'MRR da Agência'}
           </p>
-          <div className="text-xl font-bold text-white">{formatCurrency(clientFee)}</div>
+          <div className="text-lg xl:text-xl font-bold text-white break-words">{formatCurrency(clientFee)}</div>
           <div className="flex items-center gap-1 text-[10px] text-green-400 mt-2 font-bold">
             <CheckCircle2 size={12} /> Contrato formal ativo
           </div>
         </div>
-        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
+        <div className="bg-cs-surface border border-cs-border rounded-xl p-5 min-w-0">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Total Recebido no Mês</p>
-          <div className="text-xl font-bold text-emerald-400">{formatCurrency(clientPaid)}</div>
+          <div className="text-lg xl:text-xl font-bold text-emerald-400 break-words">{formatCurrency(clientPaid)}</div>
           <div className="text-[10px] text-cs-text-secondary mt-2">Faturas liquidadas</div>
         </div>
-        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
+        <div className="bg-cs-surface border border-cs-border rounded-xl p-5 min-w-0">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">A Receber / Pendente</p>
-          <div className="text-xl font-bold text-yellow-400">{formatCurrency(clientPending)}</div>
+          <div className="text-lg xl:text-xl font-bold text-yellow-400 break-words">{formatCurrency(clientPending)}</div>
           <div className="text-[10px] text-cs-text-secondary mt-2">Vencimentos programados</div>
         </div>
-        <div className="bg-cs-surface border border-cs-border rounded-xl p-5">
+        <div className="bg-cs-surface border border-cs-border rounded-xl p-5 min-w-0">
           <p className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-1">Inadimplência</p>
-          <div className="text-xl font-bold text-red-400">{formatCurrency(displayedOverdue)}</div>
+          <div className="text-lg xl:text-xl font-bold text-red-400 break-words">{formatCurrency(displayedOverdue)}</div>
           <div className="text-[10px] text-cs-text-secondary mt-2">{overdueCount} faturas em atraso</div>
         </div>
       </div>
@@ -312,7 +373,7 @@ export default function FinanceView() {
           <p className="text-[11px] text-cs-text-secondary mb-5">Somente faturas emitidas e ainda não pagas.</p>
           {receivablesByMonth.length === 0 ? (
             <div className="bg-cs-bg/50 border border-cs-border rounded-xl p-4 text-xs text-cs-text-secondary">
-              Nenhuma fatura em aberto. Registre a cobrança do mês em "Nova Cobrança".
+              Nenhuma fatura em aberto. Clique em "Gerar Mensalidades do Mês" ou em "Nova Cobrança".
             </div>
           ) : (
             <div className="space-y-3">
@@ -331,12 +392,34 @@ export default function FinanceView() {
       </div>
 
       {/* Main Tables */}
-      <div className="bg-cs-surface border border-cs-border rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-cs-border flex justify-between items-center bg-cs-surface-hover/30">
+      <div className="bg-cs-surface border border-cs-border rounded-2xl overflow-hidden shrink-0">
+        <div className="p-4 sm:p-6 border-b border-cs-border flex flex-wrap justify-between items-center gap-3 bg-cs-surface-hover/30">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Calendar size={18} className="text-cs-primary" /> Faturamento Detalhado
           </h3>
-          <span className="text-xs text-cs-text-secondary font-medium">{displayedInvoices.length} faturas encontradas</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: 'all', label: 'Todas' },
+              { id: 'pending', label: 'Pendentes' },
+              { id: 'overdue', label: 'Atrasadas' },
+              { id: 'paid', label: 'Pagas' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={cn(
+                  'px-3 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer',
+                  statusFilter === tab.id
+                    ? 'bg-cs-primary text-black border-cs-primary'
+                    : 'bg-cs-bg text-cs-text-secondary border-cs-border hover:text-white'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <span className="text-xs text-cs-text-secondary font-medium ml-2">{displayedInvoices.length} fatura(s)</span>
+          </div>
         </div>
         <div className="overflow-x-auto">
           {loading ? <p className="p-8 text-sm" role="status">Carregando cobranças…</p> : error ? (
@@ -345,7 +428,7 @@ export default function FinanceView() {
             </p>
           ) : displayedInvoices.length === 0 ? (
             <div className="p-12 text-center text-xs text-cs-text-secondary">
-              Nenhuma fatura registrada para este cliente ainda. Clique em "Nova Cobrança" para registrar um lançamento.
+              Nenhuma fatura encontrada para este filtro. Use "Gerar Mensalidades do Mês" ou "Nova Cobrança".
             </div>
           ) : (
             <table className="w-full text-left">
@@ -378,21 +461,28 @@ export default function FinanceView() {
                       {invoice.status === 'paid' ? 'Pago' : invoice.status === 'pending' ? 'Pendente' : invoice.status === 'cancelled' ? 'Cancelada' : 'Atrasada'}
                     </span>
                   </td>
-                  <td className="px-8 py-5 text-right flex items-center justify-end gap-2">
-                    {['pending', 'overdue'].includes(invoice.status) && (
-                      <>
-                        <button type="button" disabled={Boolean(pendingUpdate)}
-                          onClick={() => handleInvoiceStatus(invoice.id, 'paid')}
-                          className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white rounded text-xs font-bold">
-                          <CheckCircle2 size={14} /> Registrar pagamento
-                        </button>
-                        <button type="button" disabled={Boolean(pendingUpdate)}
-                          onClick={() => handleInvoiceStatus(invoice.id, 'cancelled')}
-                          className="px-2 py-1 text-cs-text-secondary hover:text-white text-xs">
-                          Cancelar cobrança
-                        </button>
-                      </>
-                    )}
+                  <td className="px-6 sm:px-8 py-5 text-right">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {['pending', 'overdue'].includes(invoice.status) && (
+                        <>
+                          <button type="button"
+                            onClick={() => handleSendWhatsAppReminder(invoice)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded text-xs font-bold cursor-pointer">
+                            <MessageSquare size={13} /> Cobrar WhatsApp
+                          </button>
+                          <button type="button" disabled={Boolean(pendingUpdate)}
+                            onClick={() => handleInvoiceStatus(invoice.id, 'paid')}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white rounded text-xs font-bold cursor-pointer">
+                            <CheckCircle2 size={14} /> Registrar pagamento
+                          </button>
+                          <button type="button" disabled={Boolean(pendingUpdate)}
+                            onClick={() => handleInvoiceStatus(invoice.id, 'cancelled')}
+                            className="px-2 py-1 text-cs-text-secondary hover:text-white text-xs cursor-pointer">
+                            Cancelar cobrança
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -403,6 +493,7 @@ export default function FinanceView() {
       </div>
 
       {showNewModal && <NewInvoiceModal onClose={() => setShowNewModal(false)} onSave={createInvoice} clients={clients} />}
+      <div className="h-20 shrink-0" aria-hidden="true" />
     </div>
   );
 }

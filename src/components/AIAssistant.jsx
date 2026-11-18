@@ -136,7 +136,12 @@ export default function AIAssistant() {
 
       saveHistory([
         ...newHistory,
-        { role: 'ai', text: response.text },
+        {
+          role: 'ai',
+          text: response.text,
+          provider: response.provider,
+          isFallback: Boolean(response.isFallback),
+        },
       ]);
     } catch (err) {
       saveHistory([
@@ -163,7 +168,7 @@ export default function AIAssistant() {
       <button
         onClick={toggle}
         className={cn(
-          "fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300",
+          "fixed bottom-4 right-4 z-40 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 cursor-pointer",
           isOpen
             ? "bg-cs-surface border border-cs-border scale-90"
             : "bg-gradient-to-br from-cs-primary to-cs-accent hover:scale-110 shadow-cs-accent/30"
@@ -171,16 +176,16 @@ export default function AIAssistant() {
         title="Assistente de IA"
       >
         {isOpen
-          ? <ChevronDown size={22} className="text-cs-text-secondary" />
-          : <Sparkles size={22} className="text-white animate-pulse" />
+          ? <ChevronDown size={20} className="text-cs-text-secondary" />
+          : <Sparkles size={20} className="text-black" />
         }
       </button>
 
       {/* AI Panel */}
       {isOpen && (
         <div className={cn(
-          "fixed bottom-24 right-6 z-40 bg-cs-surface border border-cs-border rounded-2xl shadow-2xl shadow-black/50 flex flex-col transition-all duration-300",
-          isExpanded ? "w-[520px] h-[75vh]" : "w-96 h-[520px]"
+          "fixed bottom-20 right-4 z-40 bg-cs-surface border border-cs-border rounded-2xl shadow-2xl shadow-black/50 flex flex-col transition-all duration-300",
+          isExpanded ? "w-[min(520px,calc(100vw-2rem))] h-[min(75vh,calc(100vh-7rem))]" : "w-[min(24rem,calc(100vw-2rem))] h-[min(520px,calc(100vh-7rem))]"
         )}>
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-cs-border shrink-0">
@@ -282,7 +287,12 @@ export default function AIAssistant() {
                       ? "bg-cs-primary text-white"
                       : "bg-cs-bg border border-cs-border text-cs-text-primary"
                   )}>
-                    {msg.text}
+                    {msg.role === 'ai' && (msg.isFallback || msg.provider === 'contextual-fallback') && (
+                      <div className="mb-1.5 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                        Modo contingência offline (provedor de IA indisponível)
+                      </div>
+                    )}
+                    <div>{msg.text}</div>
                   </div>
                 </div>
               );

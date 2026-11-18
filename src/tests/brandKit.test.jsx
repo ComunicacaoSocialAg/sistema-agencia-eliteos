@@ -133,29 +133,31 @@ describe('useProfitability hook', () => {
       isSupabaseConfigured: true,
       supabase: {
         from: (table) => ({
-          select: async () => {
-            if (table === 'clients') {
+          select: () => {
+            if (table === 'team_members') {
+              const rows = { data: [{ id: 'u1', name: 'Bruno', hourly_cost: 100 }] };
               return {
+                eq: async () => rows,
+                then: (resolve) => Promise.resolve(rows).then(resolve),
+              };
+            }
+            if (table === 'clients') {
+              return Promise.resolve({
                 data: [
                   { id: 'c1', name: 'Cliente A', monthly_fee: 4000 },
                   { id: 'c2', name: 'Cliente B', monthly_fee: 1000 },
                 ],
-              };
+              });
             }
             if (table === 'tasks') {
-              return {
+              return Promise.resolve({
                 data: [
                   { client_id: 'c1', tracked_seconds: 36000, assigned_to_id: 'u1' }, // 10h * 100 = 1000
                   { client_id: 'c2', tracked_seconds: 18000, assigned_to_id: 'u1' }, // 5h * 100 = 500
                 ],
-              };
+              });
             }
-            if (table === 'team_members') {
-              return {
-                data: [{ id: 'u1', name: 'Bruno', hourly_cost: 100 }],
-              };
-            }
-            return { data: [] };
+            return Promise.resolve({ data: [] });
           },
         }),
       },
@@ -198,5 +200,17 @@ describe('useProfitability hook', () => {
       expect(result.current.loading).toBe(false);
     });
     expect(result.current.data).toEqual([]);
+  });
+});
+
+describe('ClientLifecycle normalization', () => {
+  it('maps legacy stage aliases and canonical stages cleanly', async () => {
+    const { normalizeLifecycleStage, LIFECYCLE_STAGE_IDS } = await import('../lib/lifecycle');
+    expect(LIFECYCLE_STAGE_IDS).toEqual(['onboarding', 'setup', 'performance', 'scaling', 'retention']);
+    expect(normalizeLifecycleStage('producao')).toBe('performance');
+    expect(normalizeLifecycleStage('estrategia')).toBe('setup');
+    expect(normalizeLifecycleStage('retencao')).toBe('retention');
+    expect(normalizeLifecycleStage('scaling')).toBe('scaling');
+    expect(normalizeLifecycleStage('unknown')).toBe('onboarding');
   });
 });

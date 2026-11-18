@@ -6,17 +6,24 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { LIFECYCLE_STAGE_META, normalizeLifecycleStage } from '../lib/lifecycle';
 
-const STAGES = [
-  { id: 'onboarding', label: 'Onboarding', icon: Rocket, description: 'Integração e Briefing' },
-  { id: 'setup', label: 'Setup / DNA', icon: Settings, description: 'Configuração de Contas' },
-  { id: 'performance', label: 'Performance', icon: Zap, description: 'Tração e Resultados' },
-  { id: 'scaling', label: 'Escala', icon: TrendingUp, description: 'Expansão de Verba' },
-  { id: 'retention', label: 'Elite / LTV', icon: ShieldCheck, description: 'Parceria de Longo Prazo' },
-];
+const STAGE_ICONS = {
+  onboarding: Rocket,
+  setup: Settings,
+  performance: Zap,
+  scaling: TrendingUp,
+  retention: ShieldCheck,
+};
+
+const LIFECYCLE_STAGES = LIFECYCLE_STAGE_META.map(stage => ({
+  ...stage,
+  icon: STAGE_ICONS[stage.id] || Rocket,
+}));
 
 export default function ClientLifecycle({ currentStage = 'performance', onStageChange }) {
-  const foundIndex = STAGES.findIndex(s => s.id === currentStage);
+  const resolvedStage = normalizeLifecycleStage(currentStage);
+  const foundIndex = LIFECYCLE_STAGES.findIndex(s => s.id === resolvedStage);
   const currentIndex = foundIndex >= 0 ? foundIndex : 0;
 
   return (
@@ -30,20 +37,20 @@ export default function ClientLifecycle({ currentStage = 'performance', onStageC
         </div>
         <div className="px-3 py-1 bg-cs-primary/10 border border-cs-primary/20 rounded-full">
           <span className="text-[10px] font-bold text-cs-primary">
-            STÁGIO ATUAL: {STAGES[currentIndex].label.toUpperCase()}
+            STÁGIO ATUAL: {LIFECYCLE_STAGES[currentIndex].label.toUpperCase()}
           </span>
         </div>
       </div>
 
-      <div className="flex items-center justify-between relative px-2 sm:px-4">
-        <div className="absolute top-6 left-8 right-8 sm:left-12 sm:right-12 h-0.5 bg-cs-border z-0">
+      <div className="flex items-start justify-between gap-1.5 relative px-1 sm:px-4">
+        <div className="absolute top-5 sm:top-6 left-6 right-6 sm:left-12 sm:right-12 h-0.5 bg-cs-border z-0">
           <div
             className="h-full bg-cs-primary transition-all duration-700"
-            style={{ width: `${(currentIndex / (STAGES.length - 1)) * 100}%` }}
+            style={{ width: `${(currentIndex / (LIFECYCLE_STAGES.length - 1)) * 100}%` }}
           />
         </div>
 
-        {STAGES.map((stage, i) => {
+        {LIFECYCLE_STAGES.map((stage, i) => {
           const isCompleted = i < currentIndex;
           const isActive = i === currentIndex;
           const Icon = stage.icon;
@@ -52,7 +59,7 @@ export default function ClientLifecycle({ currentStage = 'performance', onStageC
             <>
               <div
                 className={cn(
-                  'w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center transition-all duration-300 border-2 shadow-lg',
+                  'w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center transition-all duration-300 border-2 shadow-lg shrink-0',
                   isCompleted
                     ? 'bg-cs-primary border-cs-primary text-black'
                     : isActive
@@ -63,10 +70,10 @@ export default function ClientLifecycle({ currentStage = 'performance', onStageC
               >
                 <Icon size={18} />
               </div>
-              <div className="mt-3 text-center">
+              <div className="mt-2.5 sm:mt-3 text-center px-0.5 w-full min-w-0">
                 <p
                   className={cn(
-                    'text-[10px] font-bold uppercase tracking-tighter mb-0.5',
+                    'text-[9px] sm:text-[10px] font-bold uppercase tracking-tight leading-tight mb-0.5 break-words',
                     isActive ? 'text-cs-primary' : isCompleted ? 'text-white' : 'text-cs-text-secondary'
                   )}
                 >
@@ -81,10 +88,10 @@ export default function ClientLifecycle({ currentStage = 'performance', onStageC
               <button
                 key={stage.id}
                 type="button"
-                onClick={() => stage.id !== STAGES[currentIndex].id && onStageChange(stage.id)}
+                onClick={() => stage.id !== LIFECYCLE_STAGES[currentIndex].id && onStageChange(stage.id)}
                 title={`${stage.label}: ${stage.description}`}
                 aria-pressed={isActive}
-                className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
+                className="relative z-10 flex-1 min-w-0 flex flex-col items-center group cursor-pointer focus:outline-none"
               >
                 {content}
               </button>
@@ -92,7 +99,7 @@ export default function ClientLifecycle({ currentStage = 'performance', onStageC
           }
 
           return (
-            <div key={stage.id} className="relative z-10 flex flex-col items-center" title={stage.description}>
+            <div key={stage.id} className="relative z-10 flex-1 min-w-0 flex flex-col items-center" title={stage.description}>
               {content}
             </div>
           );

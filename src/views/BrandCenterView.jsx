@@ -87,7 +87,7 @@ export default function BrandCenterView() {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-cs-bg p-6 sm:p-8 space-y-8 custom-scrollbar animate-in fade-in duration-300">
+    <div className="h-full overflow-y-auto bg-cs-bg p-6 sm:p-8 pb-24 space-y-8 custom-scrollbar animate-in fade-in duration-300">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-cs-border pb-6">
         <div>

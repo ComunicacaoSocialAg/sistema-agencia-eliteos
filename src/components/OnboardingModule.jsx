@@ -13,6 +13,7 @@ import { useInvoices } from '../hooks/useInvoices';
 import { cn } from '../utils/cn';
 import BrandKitEditor from './BrandKitEditor';
 import RegistrationLinkModal from './RegistrationLinkModal';
+import { LIFECYCLE_STAGE_META as LIFECYCLE_STAGES, normalizeLifecycleStage } from '../lib/lifecycle';
 
 const WORKFLOW_TASKS = [
   {
@@ -104,7 +105,7 @@ export default function OnboardingModule({ client, onUpdateClient }) {
     monthly_hours_contracted: client?.monthly_hours_contracted ?? 10,
     billing_day: client?.billing_day || '10',
     contract_start_date: client?.contract_start_date || new Date().toISOString().split('T')[0],
-    lifecycle_stage: client?.lifecycle_stage || 'onboarding',
+    lifecycle_stage: normalizeLifecycleStage(client?.lifecycle_stage || 'onboarding'),
   });
 
   const storedBriefing = client?.briefing_data || client?.agency_metadata?.briefing_data || {};
@@ -135,7 +136,7 @@ export default function OnboardingModule({ client, onUpdateClient }) {
       monthly_hours_contracted: client?.monthly_hours_contracted ?? 10,
       billing_day: client?.billing_day || '10',
       contract_start_date: client?.contract_start_date || new Date().toISOString().split('T')[0],
-      lifecycle_stage: client?.lifecycle_stage || 'onboarding',
+      lifecycle_stage: normalizeLifecycleStage(client?.lifecycle_stage || 'onboarding'),
     });
     const b = client?.briefing_data || client?.agency_metadata?.briefing_data || {};
     setBriefing({
@@ -399,11 +400,11 @@ Formato estrito:
     if (!onUpdateClient || !client) return;
     await onUpdateClient({
       ...client,
-      lifecycle_stage: 'producao',
+      lifecycle_stage: 'performance',
       onboarding_checklist: checklist,
       onboarding_completed_at: new Date().toISOString(),
     });
-    toast.success('Onboarding concluído. Conta avançou para Produção Ativa.');
+    toast.success('Onboarding concluído. Conta avançou para Performance.');
   };
 
   const steps = [
@@ -560,11 +561,9 @@ Formato estrito:
                 onChange={e => setContractForm(p => ({ ...p, lifecycle_stage: e.target.value }))}
                 className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
               >
-                <option value="onboarding">Onboarding / Setup</option>
-                <option value="estrategia">Estratégia & Planejamento</option>
-                <option value="producao">Produção Ativa</option>
-                <option value="performance">Escala & Performance</option>
-                <option value="retencao">Retenção / Renovação</option>
+                {LIFECYCLE_STAGES.map(stage => (
+                  <option key={stage.id} value={stage.id}>{stage.label} ({stage.description})</option>
+                ))}
               </select>
             </div>
           </div>
@@ -754,7 +753,7 @@ Formato estrito:
                   {completedChecklistCount} de {checklist.length} etapas concluídas
                 </p>
               </div>
-              {client?.lifecycle_stage === 'onboarding' && (
+              {normalizeLifecycleStage(client?.lifecycle_stage) === 'onboarding' && (
                 <button
                   type="button"
                   onClick={handleCompleteOnboarding}
