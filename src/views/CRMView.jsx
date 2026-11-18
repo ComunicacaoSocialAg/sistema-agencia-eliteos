@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { 
   Building2, Phone, Mail, Percent, Plus, X, User, Trash2, ChevronLeft, ChevronRight, 
   Sparkles, Edit3, MessageCircle, CheckCircle2, FileText,
-  AlertTriangle, RotateCcw, MessageSquare, Rocket, CalendarClock, Copy
+  AlertTriangle, RotateCcw, MessageSquare, Rocket, CalendarClock, Copy, RefreshCw
 } from 'lucide-react';
 import RegistrationLinkModal from '../components/RegistrationLinkModal';
 import { useDeals } from '../hooks/useDeals';
@@ -772,7 +772,7 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
 }
 
 export default function CRMView() {
-  const { deals, loading, error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal, deleteDeal, restoreDeal, restoreMissingDefaults, refetch } = useDeals();
+  const { deals, loading, error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal, deleteDeal, restoreDeal, restoreMissingDefaults, syncSheetProspects, refetch } = useDeals();
   const { clients, createClient, updateClient, refetch: refreshClients } = useClients();
   const { createTask, remoteMode, refresh: refreshTasks } = useTasks();
   const closing = useRef(new Set());
@@ -783,6 +783,17 @@ export default function CRMView() {
   const [selectedAiDeal, setSelectedAiDeal] = useState(null);
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [dealToDelete, setDealToDelete] = useState(null);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+
+  const handleSyncSheet = async () => {
+    if (isSyncingSheet) return;
+    setIsSyncingSheet(true);
+    try {
+      await syncSheetProspects();
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
 
   const openClientOnboarding = (clientId) => {
     if (!clientId) return;
@@ -969,6 +980,16 @@ export default function CRMView() {
           <p className="text-sm text-cs-text-secondary">Pipeline comercial e acompanhamento de propostas ativas.</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={isSyncingSheet}
+            onClick={handleSyncSheet}
+            className="bg-cs-surface hover:bg-cs-surface-hover border border-cs-border text-cs-text-secondary hover:text-white px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="Sincronizar novos leads da aba Pipeline CRM da planilha Google"
+          >
+            <RefreshCw size={14} className={isSyncingSheet ? "animate-spin text-cs-primary" : "text-cs-text-secondary"} />
+            <span>{isSyncingSheet ? "Sincronizando..." : "Sincronizar Planilha"}</span>
+          </button>
           <button
             type="button"
             onClick={() => setRegistrationContext({})}

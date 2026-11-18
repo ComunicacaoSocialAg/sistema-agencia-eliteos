@@ -453,10 +453,54 @@ export function useDeals(enabled = true) {
     window.dispatchEvent(new Event('csag:deals-changed'));
   };
 
+  const syncSheetProspects = async () => {
+    if (!serverMode || !supabase) {
+      toast.error('Sincronização disponível apenas no modo conectado ao Supabase.');
+      return { ok: false, error: 'Modo local ou não autenticado.' };
+    }
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-sheet-prospects', {
+        headers: { 'x-api-key': '104256Br' },
+        body: {},
+      });
+
+      if (error) throw error;
+
+      if (data?.permission_required) {
+        toast.error(
+          data.message || 'A planilha requer permissão de leitura. Compartilhe com "Qualquer pessoa com o link" (Leitor).',
+          { duration: 9000 }
+        );
+        return data;
+      }
+
+      if (!data?.ok) {
+        toast.error(data?.error || 'Não foi possível sincronizar a planilha.');
+        return data;
+      }
+
+      const inserted = data.inserted_count || 0;
+      const skipped = data.skipped_count || 0;
+
+      if (inserted > 0) {
+        toast.success(`${inserted} novo(s) lead(s) importado(s) do Pipeline CRM! (${skipped} já no CRM)`);
+        await fetchSupabaseDeals();
+      } else {
+        toast.success(`Planilha em dia: todos os ${skipped} leads já constam no CRM.`);
+        await fetchSupabaseDeals();
+      }
+
+      return data;
+    } catch (err) {
+      toast.error(`Erro ao sincronizar com a planilha: ${err?.message || 'Falha de conexão.'}`);
+      return { ok: false, error: err?.message };
+    }
+  };
+
   return {
     deals: enabled && (!serverMode || canWrite) ? deals : [],
     loading: enabled && (!serverMode || canWrite) && loading,
     error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal,
-    deleteDeal, restoreDeal, restoreMissingDefaults, refetch: fetchSupabaseDeals,
+    deleteDeal, restoreDeal, restoreMissingDefaults, syncSheetProspects, refetch: fetchSupabaseDeals,
   };
 }

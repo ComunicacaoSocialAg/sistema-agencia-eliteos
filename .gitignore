@@ -34,3 +34,4 @@ client_secret*.json
 *.sw?
 .vercel
 .env*
+supabase/.temp/
