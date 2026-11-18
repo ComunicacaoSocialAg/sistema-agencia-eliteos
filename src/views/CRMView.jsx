@@ -974,12 +974,12 @@ export default function CRMView() {
   return (
     <div className="h-full flex flex-col bg-cs-bg p-6 overflow-hidden">
       {/* Top Header */}
-      <div className="flex items-center justify-between mb-6 shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6 shrink-0">
         <div>
           <h2 className="text-2xl font-bold text-white mb-1">CRM (Novos Negócios)</h2>
           <p className="text-sm text-cs-text-secondary">Pipeline comercial e acompanhamento de propostas ativas.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             disabled={isSyncingSheet}
