@@ -4,15 +4,17 @@ import {
   Calendar, TrendingUp, Folder, ChevronRight, Sparkles,
   Sun, Sunset, Moon, RefreshCw, User
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
 import { useTasks } from '../hooks/useTasks';
 import { useProjects } from '../hooks/useProjects';
+import { areIdsMatching, useClients } from '../hooks/useClients';
 import { useAuth } from '../contexts/AuthContext';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { format, isToday, isTomorrow, isThisWeek, isPast, parseISO, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale/pt-BR';
 import { generateContent } from '../lib/gemini';
-import { cn as clsxCn } from '../utils/cn';
+import { operationId } from '../lib/operationId';
 import TaskModal from '../components/TaskModal';
 
 const COLUMNS = [
@@ -64,7 +66,7 @@ function TaskRow({ task, onOpen }) {
       <div className={cn("w-2 h-2 rounded-full shrink-0", isOverdue ? "bg-red-500 animate-pulse" : "bg-cs-primary")} />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-white font-medium truncate">{task.title}</p>
-        <p className="text-[10px] text-cs-text-secondary truncate">{task.client?.name || task.client_name || '—'}</p>
+        <p className="text-[10px] text-cs-text-secondary truncate">{task.client?.name || task.client_name || 'Interno'}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {deadline && (
@@ -173,12 +175,34 @@ Gere um resumo do dia em 2-3 frases, em tom profissional e motivador. Seja diret
 
 export default function DashboardView({ onOpenTask }) {
   const { profile } = useAuth();
-  const { tasks, updateTask, addComment, toggleChecklist } = useTasks();
+  const { tasks, updateTask, addComment, toggleChecklist, createTask, remoteMode } = useTasks();
   const { projects } = useProjects();
+  const { clients = [] } = useClients();
   const { setContext } = useAIAssistant();
   const [selectedTask, setSelectedTask] = useState(null);
 
   const handleOpenTask = onOpenTask || setSelectedTask;
+
+  const scheduleFollowUp = async (task, deadline) => {
+    const client = clients.find(item =>
+      areIdsMatching(item.id, task.client_id, item.name, task.client_name));
+    if (!client) {
+      toast.error('Vincule a tarefa a um cliente antes de marcar o acompanhamento.');
+      return null;
+    }
+
+    return createTask({
+      id: await operationId(`acompanhamento-${task.id}-${deadline}`, remoteMode),
+      title: `Acompanhar: ${task.title}`,
+      client_id: client.id,
+      client_name: client.name,
+      deadline,
+      status: 'backlog',
+      tag: task.tag,
+      notes: `Acompanhamento da entrega "${task.title}".`,
+      external_links: (task.external_links || []).filter(link => link?.kind === 'delivery'),
+    });
+  };
 
   const userName = profile?.name || 'Usuário';
   const userRole = profile?.role;
@@ -339,7 +363,17 @@ export default function DashboardView({ onOpenTask }) {
                 {activeProjects.slice(0, 5).map(proj => {
                   const pct = proj.task_count > 0 ? Math.round((proj.tasks_done / proj.task_count) * 100) : 0;
                   return (
-                    <div key={proj.id} className="space-y-1.5">
+                    <button
+                      key={proj.id}
+                      type="button"
+                      onClick={() => window.dispatchEvent(new CustomEvent('csag:navigate', {
+                        detail: {
+                          view: 'clientes',
+                          clientId: proj.client_id && proj.client_id !== 'internal' ? proj.client_id : undefined,
+                        },
+                      }))}
+                      className="w-full text-left space-y-1.5 p-2 -mx-2 rounded-xl hover:bg-cs-bg transition-colors cursor-pointer"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="min-w-0">
                           <p className="text-xs text-white font-medium truncate">{proj.name}</p>
@@ -353,7 +387,7 @@ export default function DashboardView({ onOpenTask }) {
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
                 {activeProjects.length === 0 && (
@@ -373,7 +407,7 @@ export default function DashboardView({ onOpenTask }) {
                   { label: 'Total de tarefas', value: myTasks.length, color: 'text-white' },
                   { label: 'Em produção', value: myTasks.filter(t => t.status === 'em-producao').length, color: 'text-purple-400' },
                   { label: 'Aguard. cliente', value: myTasks.filter(t => t.status === 'aguardando-cliente').length, color: 'text-orange-400' },
-                  { label: 'Concluídas (demo)', value: tasks.filter(t => t.status === 'concluido').length, color: 'text-green-400' },
+                  { label: 'Concluídas', value: tasks.filter(t => t.status === 'concluido').length, color: 'text-green-400' },
                 ].map(item => (
                   <div key={item.label} className="flex items-center justify-between">
                     <span className="text-xs text-cs-text-secondary">{item.label}</span>
@@ -391,6 +425,7 @@ export default function DashboardView({ onOpenTask }) {
           onUpdate={updateTask}
           onAddComment={addComment}
           onToggleChecklist={toggleChecklist}
+          onScheduleFollowUp={scheduleFollowUp}
           columns={COLUMNS}
           user={profile}
         />

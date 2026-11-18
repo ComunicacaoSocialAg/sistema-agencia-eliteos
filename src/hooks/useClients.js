@@ -48,9 +48,9 @@ export const INITIAL_DEMO_CLIENTS = [
     value_proposition: 'Diagnóstico vascular com Ecodoppler em tempo real e tratamento de varizes a Laser sem repouso prolongado no Edifício Unique.',
     strategic_goals: 'Posicionamento de alta autoridade científica com o Calendário Trimestral (36 posts) no Edifício Unique',
     ai_instructions: 'Respeitar rigorosamente a Resolução CFM 2.336/2023: proibido antes e depois, proibido promessa de resultado, incluir CRM-MG 39529 e RQE 15412.',
-    drive_url: 'https://drive.google.com/drive/folders/demo-dr-alberto',
-    reportei_url: 'https://app.reportei.com/demo-dr-alberto',
-    forms_url: 'https://forms.gle/dralberto-onboarding',
+    drive_url: '',
+    reportei_url: '',
+    forms_url: '',
     reportei_config: {
       meta_ad_account_id: 'act_6957602694317339',
       instagram_handle: '@dralbertobr',
@@ -61,9 +61,7 @@ export const INITIAL_DEMO_CLIENTS = [
     accent_color: '#38bdf8',
     typography: 'Inter + Outfit',
     keywords: ['Cirurgia Vascular', 'Varizes', 'Laser Transdérmico', 'Poços de Caldas', 'Saúde Vascular', 'Doppler'],
-    assets: [
-      { id: 'ast-alb-1', name: 'Logo_DrAlbertoBrasil_Oficial.png', type: 'image', url: 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?q=80&w=600&auto=format&fit=crop' }
-    ]
+    assets: []
   },
   {
     id: 'client-dubola',
@@ -82,9 +80,9 @@ export const INITIAL_DEMO_CLIENTS = [
     value_proposition: 'Molhos artesanais nobres com ingredientes selecionados e identidade gastronômica marcante.',
     strategic_goals: 'Expandir presença nacional e gerar vendas B2B e e-commerce',
     ai_instructions: 'Destacar textura, sabor artesanal, harmonização gastronômica e apelo visual apetitoso.',
-    drive_url: 'https://drive.google.com/drive/folders/demo-dubola',
-    reportei_url: 'https://app.reportei.com/demo-dubola',
-    forms_url: 'https://forms.gle/dubola-onboarding',
+    drive_url: '',
+    reportei_url: '',
+    forms_url: '',
     reportei_config: {
       meta_ad_account_id: 'act_844396960524350',
       instagram_handle: '@dubolamolhos',
@@ -95,10 +93,7 @@ export const INITIAL_DEMO_CLIENTS = [
     accent_color: '#ef4444',
     typography: 'Playfair Display + Inter',
     keywords: ['Gourmet', 'Artesanal', 'Molhos Nobres', 'Sabor Autêntico', 'Premium'],
-    assets: [
-      { id: 'ast-1', name: 'Logo_Dubola_Oficial_Vetor.svg', type: 'vector', url: 'https://images.unsplash.com/photo-1542744094-3a31f272c490?q=80&w=600&auto=format&fit=crop' },
-      { id: 'ast-2', name: 'Manual_Identidade_Visual_2026.pdf', type: 'pdf', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop' }
-    ]
+    assets: []
   }
 ];
 
@@ -136,6 +131,7 @@ function enrichClientWithLocalMeta(rawClient) {
       savedMeta = { ...savedMeta, ...metaMap[key] };
     }
   }
+  const resolvedPrimary = savedMeta.primary_color || savedMeta.brand_color || rawClient.primary_color || rawClient.brand_color || demoBaseline.primary_color || demoBaseline.brand_color || '#3b82f6';
   return {
     ...demoBaseline,
     ...rawClient,
@@ -143,8 +139,8 @@ function enrichClientWithLocalMeta(rawClient) {
     id: rawClient.id, // Preserva o ID primário da lista
     name: savedMeta.name || rawClient.name || demoBaseline.name,
     monthly_fee: savedMeta.monthly_fee !== undefined ? Number(savedMeta.monthly_fee) : (rawClient.monthly_fee !== undefined ? Number(rawClient.monthly_fee) : demoBaseline.monthly_fee),
-    brand_color: savedMeta.brand_color || rawClient.brand_color || demoBaseline.brand_color || '#3b82f6',
-    primary_color: savedMeta.primary_color || savedMeta.brand_color || rawClient.brand_color || demoBaseline.primary_color || '#3b82f6',
+    brand_color: resolvedPrimary,
+    primary_color: resolvedPrimary,
   };
 }
 
@@ -196,25 +192,33 @@ const METADATA_COLUMNS = [
   'document_id', 'billing_day', 'contract_start_date', 'contract_end_date', 'drive_url',
   'reportei_url', 'strategic_goals', 'primary_color', 'secondary_color', 'accent_color', 'typography',
   'keywords', 'assets', 'industry', 'website', 'instagram', 'logo_variations', 'forms_url', 'ai_instructions',
+  'briefing_data', 'onboarding_checklist', 'onboarding_completed_at', 'deal_id', 'address', 'registration_id',
 ];
 
 function buildSafeSupabasePayload(clientObj) {
+  const normalizedPrimary = clientObj.primary_color || clientObj.brand_color;
+  const source = normalizedPrimary
+    ? { ...clientObj, brand_color: normalizedPrimary, primary_color: normalizedPrimary }
+    : clientObj;
   const payload = {};
   for (const col of SUPABASE_SAFE_COLUMNS) {
-    if (clientObj[col] !== undefined) {
-      payload[col] = clientObj[col];
+    if (source[col] !== undefined) {
+      payload[col] = source[col];
     }
   }
-  const metadata = Object.fromEntries(METADATA_COLUMNS.filter(key => clientObj[key] !== undefined)
-    .map(key => [key, clientObj[key]]));
-  if (Object.keys(metadata).length) payload.agency_metadata = { ...clientObj.agency_metadata, ...metadata };
+  const metadata = Object.fromEntries(METADATA_COLUMNS.filter(key => source[key] !== undefined)
+    .map(key => [key, source[key]]));
+  if (Object.keys(metadata).length || source.agency_metadata) {
+    payload.agency_metadata = { ...(source.agency_metadata || {}), ...metadata };
+  }
   return payload;
 }
 
 function presentRemoteClient(client) {
   const metadata = Object.fromEntries(METADATA_COLUMNS.filter(key => client.agency_metadata?.[key] !== undefined)
     .map(key => [key, client.agency_metadata[key]]));
-  return { ...client, ...metadata, primary_color: metadata.primary_color || client.brand_color };
+  const resolvedPrimary = metadata.primary_color || client.brand_color || '#3b82f6';
+  return { ...client, ...metadata, brand_color: resolvedPrimary, primary_color: resolvedPrimary };
 }
 
 export function useClients() {
@@ -308,9 +312,11 @@ export function useClients() {
         const row = data || (handoff && clientData.id
           ? (await supabase.from('clients').select('*').eq('id', clientData.id).single()).data : null);
         if (!row) throw new Error('Cadastro não confirmado');
+        const presented = presentRemoteClient(row);
+        setClients(prev => [presented, ...prev.filter(c => c.id !== presented.id)]);
         window.dispatchEvent(new Event('csag:remote-clients-changed'));
         toast.success('Cliente cadastrado.');
-        return presentRemoteClient(row);
+        return presented;
       } catch {
         toast.error('Não foi possível cadastrar o cliente. Confira os dados e tente novamente.');
         return null;
@@ -346,13 +352,16 @@ export function useClients() {
       if (remote) {
         const current = clients.find(client => client.id === updated.id);
         if (!current) throw new Error('Cliente indisponível');
+        const merged = { ...current, ...updated, agency_metadata: { ...(current.agency_metadata || {}), ...(updated.agency_metadata || {}) } };
         const { data, error } = await supabase.from('clients')
-          .update(buildSafeSupabasePayload({ ...updated, agency_metadata: current.agency_metadata }))
+          .update(buildSafeSupabasePayload(merged))
           .eq('id', updated.id).select().single();
         if (error || !data) throw error;
+        const presented = presentRemoteClient(data);
+        setClients(prev => prev.map(c => c.id === presented.id ? presented : c));
         window.dispatchEvent(new Event('csag:remote-clients-changed'));
         toast.success('Ficha do cliente atualizada.');
-        return presentRemoteClient(data);
+        return presented;
       }
       if (isFirebaseConfigured && db) {
         const { id, ...values } = updated;

@@ -20,7 +20,7 @@ const DEFAULT_DEMO_PROJECTS = [
     description: 'Campanha trimestral de posicionamento de alta autoridade científica para cirurgia vascular e laser transdérmico.',
     task_count: 12,
     tasks_done: 8,
-    drive_folder_url: 'https://drive.google.com/drive/folders/demo-dr-alberto',
+    drive_folder_url: '',
     created_at: new Date(Date.now() - 3600000 * 72).toISOString()
   },
   {
@@ -37,7 +37,7 @@ const DEFAULT_DEMO_PROJECTS = [
     description: 'Redesign completo da identidade visual, novos rótulos, manual de marca e lançamento.',
     task_count: 10,
     tasks_done: 7,
-    drive_folder_url: 'https://drive.google.com/drive/folders/demo-dubola',
+    drive_folder_url: '',
     created_at: new Date(Date.now() - 3600000 * 120).toISOString()
   },
   {

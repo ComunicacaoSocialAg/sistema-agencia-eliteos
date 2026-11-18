@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { 
-  BarChart3, TrendingUp, DollarSign, Target, Plus, 
-  ExternalLink, Trash2, CheckCircle2, AlertTriangle, ShieldCheck, 
-  Save, X, Filter, Sparkles, Layers 
+import {
+  BarChart3, DollarSign, Target, Plus,
+  ExternalLink, Trash2, ShieldCheck,
+  Save, X, Filter, Edit3, Kanban
 } from 'lucide-react';
 import { useCampaignManagement } from '../hooks/useCampaignManagement';
 import { useActiveClient } from '../contexts/ActiveClientContext';
+import { useTasks } from '../hooks/useTasks';
 import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
 
@@ -18,14 +19,17 @@ const STATUS_CONFIG = {
 
 export default function PaidMediaView() {
   const { selectedClient, isAllClients, clients } = useActiveClient();
-  const { campaigns, reports, loading, error, refreshData, createCampaign, updateCampaignStatus, deleteCampaign, addCampaignReport } = useCampaignManagement();
+  const { campaigns, reports, loading, error, refreshData, createCampaign, updateCampaign, updateCampaignStatus, deleteCampaign, addCampaignReport } = useCampaignManagement();
+  const { createTask } = useTasks();
 
   const [platformFilter, setPlatformFilter] = useState('todas');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingCampaignId, setEditingCampaignId] = useState(null);
+  const [dailyTouched, setDailyTouched] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [cpaTouched, setCpaTouched] = useState(false);
 
-  // Form de nova campanha
-  const [newCampaign, setNewCampaign] = useState({
+  const emptyCampaignForm = () => ({
     client_id: selectedClient?.id || clients[0]?.id || '',
     name: '',
     platform: 'Meta Ads',
@@ -34,8 +38,11 @@ export default function PaidMediaView() {
     budget_daily: '',
     status: 'ativa',
     ad_url: '',
-    results_summary: ''
+    results_summary: '',
   });
+
+  // Form de nova campanha / edição
+  const [newCampaign, setNewCampaign] = useState(emptyCampaignForm);
 
   // Form de prestação de contas mensal
   const [newReport, setNewReport] = useState({
@@ -46,6 +53,75 @@ export default function PaidMediaView() {
     cpa_real: '',
     diagnosis: ''
   });
+
+  const openNewCampaignModal = () => {
+    setEditingCampaignId(null);
+    setDailyTouched(false);
+    setNewCampaign(emptyCampaignForm());
+    setShowAddModal(true);
+  };
+
+  const openEditCampaignModal = (camp) => {
+    setEditingCampaignId(camp.id);
+    setDailyTouched(Boolean(camp.budget_daily));
+    setNewCampaign({
+      client_id: camp.client_id || selectedClient?.id || clients[0]?.id || '',
+      name: camp.name || '',
+      platform: camp.platform || 'Meta Ads',
+      objective: camp.objective || 'Leads',
+      budget_monthly: camp.budget_monthly ?? '',
+      budget_daily: camp.budget_daily ?? '',
+      status: camp.status || 'ativa',
+      ad_url: camp.ad_url || '',
+      results_summary: camp.results_summary || '',
+    });
+    setShowAddModal(true);
+  };
+
+  const handleMonthlyBudgetChange = (val) => {
+    setNewCampaign(prev => {
+      const num = Number(val);
+      const nextDaily = !dailyTouched && Number.isFinite(num) && num > 0
+        ? (num / 30).toFixed(2)
+        : (!dailyTouched ? '' : prev.budget_daily);
+      return { ...prev, budget_monthly: val, budget_daily: nextDaily };
+    });
+  };
+
+  const handleReportNumericChange = (field, val) => {
+    setNewReport(prev => {
+      const next = { ...prev, [field]: val };
+      const invested = Number(field === 'invested_amount' ? val : prev.invested_amount);
+      const conversions = Number(field === 'conversions_count' ? val : prev.conversions_count);
+      if (!cpaTouched && Number.isFinite(invested) && invested >= 0 && Number.isFinite(conversions) && conversions > 0) {
+        next.cpa_real = (invested / conversions).toFixed(2);
+      }
+      return next;
+    });
+  };
+
+  const handleCreateCampaignTask = async (camp) => {
+    const targetClientId = camp.client_id || selectedClient?.id || clients[0]?.id;
+    if (!targetClientId) {
+      toast.error('Vincule a campanha a um cliente antes de criar a demanda.');
+      return;
+    }
+    const created = await createTask({
+      title: `Criativos / Otimização: ${camp.name}`,
+      client_id: targetClientId,
+      tag: 'Campanha',
+      status: 'briefing',
+      priority: 'medium',
+      notes: [
+        `Plataforma: ${camp.platform} | Objetivo: ${camp.objective}`,
+        `Verba mensal: R$ ${Number(camp.budget_monthly || 0).toLocaleString('pt-BR')}`,
+        camp.results_summary || '',
+      ].filter(Boolean).join('\n'),
+    });
+    if (created) {
+      toast.success('Demanda de campanha criada no Kanban de Produção.');
+    }
+  };
 
   const isMedicalClient = selectedClient?.document_id?.includes('CRM') || selectedClient?.name?.includes('Dr.');
 
@@ -64,26 +140,23 @@ export default function PaidMediaView() {
       return;
     }
 
-    const saved = await createCampaign({
+    const payload = {
       ...newCampaign,
-      client_id: isAllClients ? newCampaign.client_id : selectedClient?.id,
+      name: newCampaign.name.trim(),
+      client_id: isAllClients ? newCampaign.client_id : (selectedClient?.id || newCampaign.client_id),
       budget_monthly: Number(newCampaign.budget_monthly) || 0,
-      budget_daily: Number(newCampaign.budget_daily) || 0
-    });
+      budget_daily: Number(newCampaign.budget_daily) || 0,
+    };
+
+    const saved = editingCampaignId
+      ? await updateCampaign(editingCampaignId, payload)
+      : await createCampaign(payload);
 
     if (!saved) return;
     setShowAddModal(false);
-    setNewCampaign({
-      client_id: selectedClient?.id || clients[0]?.id || '',
-      name: '',
-      platform: 'Meta Ads',
-      objective: 'Leads',
-      budget_monthly: '',
-      budget_daily: '',
-      status: 'ativa',
-      ad_url: '',
-      results_summary: ''
-    });
+    setEditingCampaignId(null);
+    setDailyTouched(false);
+    setNewCampaign(emptyCampaignForm());
   };
 
   const handleAddReport = async (e) => {
@@ -98,7 +171,10 @@ export default function PaidMediaView() {
       client_id: isAllClients ? newReport.client_id : selectedClient?.id
     });
 
-    if (saved) setShowReportModal(false);
+    if (saved) {
+      setShowReportModal(false);
+      setCpaTouched(false);
+    }
   };
 
   return (
@@ -134,8 +210,8 @@ export default function PaidMediaView() {
               <Save size={15} /> Prestação de Contas
             </button>
             <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-cs-primary hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-cs-primary/20"
+              onClick={openNewCampaignModal}
+              className="bg-cs-primary hover:bg-yellow-400 text-black px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-cs-primary/20 cursor-pointer"
             >
               <Plus size={16} /> Nova Campanha
             </button>
@@ -144,14 +220,16 @@ export default function PaidMediaView() {
 
         {/* Alerta de Conformidade Médica se aplicável */}
         {isMedicalClient && (
-          <div className="mt-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-blue-300">
+          <div className="mt-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 text-xs text-blue-300">
             <div className="flex items-center gap-2">
               <ShieldCheck size={16} className="text-blue-400 shrink-0" />
               <span>
-                <strong>Normativa CFM 2.336/2023:</strong> É vedado anúncio com preço promocional, promessa de resultado ou apelo sensacionalista. O RQE 15412 deve constar nos criativos.
+                <strong>Normativa médica aplicável:</strong> É vedado anúncio com preço promocional, promessa de resultado ou apelo sensacionalista.{' '}
+                {selectedClient?.document_id
+                  ? `A identificação profissional (${selectedClient.document_id}) deve constar nos criativos.`
+                  : 'O CRM e RQE do responsável técnico devem constar nos criativos.'}
               </span>
             </div>
-            <span className="text-[10px] bg-blue-500/20 px-2 py-0.5 rounded font-mono font-bold">CFM 2.336/2023</span>
           </div>
         )}
       </header>
@@ -228,8 +306,8 @@ export default function PaidMediaView() {
               Cadastre as campanhas que você opera para este cliente para manter o controle de orçamentos e links diretos dos anúncios.
             </p>
             <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-cs-primary text-black px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+              onClick={openNewCampaignModal}
+              className="bg-cs-primary text-black px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={16} /> Cadastrar Nova Campanha
             </button>
@@ -286,7 +364,7 @@ export default function PaidMediaView() {
                   </div>
 
                   {/* Ações */}
-                  <div className="pt-3 border-t border-cs-border/60 flex items-center justify-between mt-2">
+                  <div className="pt-3 border-t border-cs-border/60 flex flex-wrap items-center justify-between gap-2 mt-2">
                     <select
                       value={camp.status}
                       onChange={(e) => updateCampaignStatus(camp.id, e.target.value)}
@@ -298,7 +376,24 @@ export default function PaidMediaView() {
                       <option value="encerrada">Encerrada</option>
                     </select>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCreateCampaignTask(camp)}
+                        className="px-2.5 py-1 rounded-lg bg-cs-primary/10 hover:bg-cs-primary/20 text-cs-primary border border-cs-primary/30 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Gerar demanda de criativos ou otimização no Kanban"
+                      >
+                        <Kanban size={12} /> Criar Demanda no Kanban
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditCampaignModal(camp)}
+                        aria-label={`Editar campanha ${camp.name}`}
+                        className="p-1.5 text-cs-text-secondary hover:text-white rounded-lg hover:bg-cs-bg transition-colors cursor-pointer"
+                        title="Editar campanha"
+                      >
+                        <Edit3 size={14} />
+                      </button>
                       {camp.ad_url && (
                         <a
                           href={camp.ad_url}
@@ -311,8 +406,9 @@ export default function PaidMediaView() {
                         </a>
                       )}
                       <button
+                        type="button"
                         onClick={() => window.confirm('Remover o registro da campanha?') && deleteCampaign(camp.id)}
-                        className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-cs-bg transition-colors"
+                        className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-cs-bg transition-colors cursor-pointer"
                         title="Remover campanha"
                       >
                         <Trash2 size={14} />
@@ -365,7 +461,7 @@ export default function PaidMediaView() {
                       <td className="py-3 px-3">R$ {Number(r.invested_amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                       <td className="py-3 px-3 font-bold text-emerald-400">{r.conversions_count || 0} conversões</td>
                       <td className="py-3 px-3 font-mono">R$ {Number(r.cpa_real || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                      <td className="py-3 px-3 text-cs-text-secondary max-w-sm">{r.diagnosis || '—'}</td>
+                      <td className="py-3 px-3 text-cs-text-secondary max-w-sm">{r.diagnosis || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -375,18 +471,20 @@ export default function PaidMediaView() {
         </div>
       </div>
 
-      {/* Modal Nova Campanha */}
+      {/* Modal Nova / Editar Campanha */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-lg p-6 shadow-2xl relative">
+          <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 shadow-2xl relative custom-scrollbar">
             <button
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-5 right-5 text-cs-text-secondary hover:text-white"
+              onClick={() => { setShowAddModal(false); setEditingCampaignId(null); }}
+              className="absolute top-5 right-5 text-cs-text-secondary hover:text-white cursor-pointer"
             >
               <X size={20} />
             </button>
 
-            <h2 className="text-lg font-bold text-white mb-1">Cadastrar Nova Campanha de Tráfego</h2>
+            <h2 className="text-lg font-bold text-white mb-1">
+              {editingCampaignId ? 'Editar Campanha de Tráfego' : 'Cadastrar Nova Campanha de Tráfego'}
+            </h2>
             <p className="text-xs text-cs-text-secondary mb-5">
               Registro interno de status e orçamento da campanha.
             </p>
@@ -447,7 +545,7 @@ export default function PaidMediaView() {
                     type="number"
                     step="0.01"
                     value={newCampaign.budget_monthly}
-                    onChange={e => setNewCampaign({ ...newCampaign, budget_monthly: e.target.value })}
+                    onChange={e => handleMonthlyBudgetChange(e.target.value)}
                     placeholder="Ex: 1800.00"
                     required
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
@@ -459,7 +557,10 @@ export default function PaidMediaView() {
                     type="number"
                     step="0.01"
                     value={newCampaign.budget_daily}
-                    onChange={e => setNewCampaign({ ...newCampaign, budget_daily: e.target.value })}
+                    onChange={e => {
+                      setDailyTouched(Boolean(e.target.value));
+                      setNewCampaign({ ...newCampaign, budget_daily: e.target.value });
+                    }}
                     placeholder="Ex: 60.00"
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
                   />
@@ -491,16 +592,16 @@ export default function PaidMediaView() {
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-cs-text-secondary hover:text-white"
+                  onClick={() => { setShowAddModal(false); setEditingCampaignId(null); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-cs-text-secondary hover:text-white cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="bg-cs-primary hover:bg-yellow-400 text-black px-5 py-2 rounded-xl text-xs font-bold transition-all"
+                  className="bg-cs-primary hover:bg-yellow-400 text-black px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
-                  Salvar Campanha
+                  {editingCampaignId ? 'Salvar Alterações' : 'Salvar Campanha'}
                 </button>
               </div>
             </form>
@@ -551,7 +652,7 @@ export default function PaidMediaView() {
                     type="number"
                     step="0.01"
                     value={newReport.invested_amount}
-                    onChange={e => setNewReport({ ...newReport, invested_amount: e.target.value })}
+                    onChange={e => handleReportNumericChange('invested_amount', e.target.value)}
                     placeholder="Ex: 3000.00"
                     required
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
@@ -565,7 +666,7 @@ export default function PaidMediaView() {
                   <input
                     type="number"
                     value={newReport.conversions_count}
-                    onChange={e => setNewReport({ ...newReport, conversions_count: e.target.value })}
+                    onChange={e => handleReportNumericChange('conversions_count', e.target.value)}
                     placeholder="Ex: 85"
                     required
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
@@ -577,7 +678,10 @@ export default function PaidMediaView() {
                     type="number"
                     step="0.01"
                     value={newReport.cpa_real}
-                    onChange={e => setNewReport({ ...newReport, cpa_real: e.target.value })}
+                    onChange={e => {
+                      setCpaTouched(Boolean(e.target.value));
+                      setNewReport({ ...newReport, cpa_real: e.target.value });
+                    }}
                     placeholder="Ex: 35.29"
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
                   />

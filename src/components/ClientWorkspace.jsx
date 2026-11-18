@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, 
-  Target, 
-  Kanban, 
-  CheckCircle2, 
-  Share2, 
-  FileText, 
-  ExternalLink, 
-  Globe, 
-  Camera, 
-  Users, 
+import {
+  LayoutDashboard,
+  Kanban,
+  CheckCircle2,
+  Share2,
+  ExternalLink,
+  Globe,
+  Camera,
+  Users,
   MessageSquare,
   ArrowLeft,
   Settings,
@@ -19,91 +17,52 @@ import {
   BarChart2,
   AlertTriangle,
   Clock,
-  Zap,
   Lock,
   Eye,
   EyeOff,
   Bot,
-  Sparkles,
   Copy,
   Trash2,
   Rocket,
-  Shield
+  Palette,
+  AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { generateStrategicPlan } from '../lib/openai';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { useAuth } from '../contexts/AuthContext';
 import { copyApprovalUrl } from '../hooks/useDeliverables';
 import { useTasks } from '../hooks/useTasks';
 import { useTeam } from '../hooks/useTeam';
 import { useInvoices } from '../hooks/useInvoices';
+import { useSocialManagement } from '../hooks/useSocialManagement';
+import { useCampaignManagement } from '../hooks/useCampaignManagement';
 import { areIdsMatching } from '../hooks/useClients';
+import { getClientBrandKit } from '../lib/brandKit';
 import { cn } from '../utils/cn';
 import NewTaskModal from './NewTaskModal';
-
-function NPSModal({ onScore }) {
-  const [score, setScore] = useState(null);
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-500">
-      <div className="bg-cs-surface border border-cs-border rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
-        <div className="w-16 h-16 bg-cs-primary/20 text-cs-primary rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <TrendingIcon size={32} />
-        </div>
-        <h2 className="text-xl font-bold text-white mb-2">Sua opinião importa!</h2>
-        <p className="text-sm text-cs-text-secondary mb-8">De 0 a 10, o quanto você recomendaria a CS Ag para um parceiro?</p>
-        
-        <div className="grid grid-cols-5 gap-2 mb-8">
-          {[1,2,3,4,5,6,7,8,9,10].map(s => (
-            <button 
-              key={s} 
-              onClick={() => setScore(s)}
-              className={cn(
-                "w-full aspect-square rounded-lg border font-bold transition-all",
-                score === s ? "bg-cs-primary border-cs-primary text-white scale-110" : "bg-cs-bg border-cs-border text-cs-text-secondary hover:border-cs-primary hover:text-white"
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        <button 
-          onClick={() => score && onScore(score)}
-          disabled={!score}
-          className="w-full bg-cs-primary hover:bg-cs-primary-hover disabled:opacity-50 text-white py-3 rounded-xl font-bold transition-all"
-        >
-          Enviar Feedback
-        </button>
-      </div>
-    </div>
-  );
-}
-
 import ClientLifecycle from './ClientLifecycle';
-import StrategicRoadmap from './StrategicRoadmap';
-import MeetingMinutes from './MeetingMinutes';
 import OnboardingModule from './OnboardingModule';
+import BrandKitEditor from './BrandKitEditor';
 import AIBrainModule from './AIBrainModule';
 import ClientConfigModal from './ClientConfigModal';
-import GovernanceModule from './GovernanceModule';
 import ApprovalFlow from './ApprovalFlow';
-import { reportei } from '../lib/reportei';
+import TaskModal from './TaskModal';
 
 export default function ClientWorkspace({ client: initialClient, onBack, viewMode = 'internal', onUpdateClient, initialTab = 'overview' }) {
   const [client, setClient] = useState(initialClient);
   const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const isPortal = viewMode === 'portal';
-  const { role, isDemoMode, createUser } = useAuth();
+  const { role, profile, isDemoMode, createUser } = useAuth();
   const [showInvite, setShowInvite] = useState(false);
   const { setContext } = useAIAssistant();
-  const { tasks, createTask } = useTasks(client.id);
+  const { tasks, createTask, updateTask, addComment, toggleChecklist } = useTasks(client.id);
   const { invoices } = useInvoices();
   const clientInvoices = invoices.filter(inv => areIdsMatching(inv.client_id, client.id, inv.client?.name || inv.client_name, client.name));
-  const [showNPS, setShowNPS] = useState(false);
   const [showNewDemand, setShowNewDemand] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const selectedTask = tasks.find(t => t.id === selectedTaskId) || null;
 
   useEffect(() => {
     setClient(initialClient);
@@ -118,18 +77,15 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     return saved;
   };
 
-  // Sincronizar contexto da IA com dados do Reportei e Memórias Persistentes
   useEffect(() => {
     async function updateContext() {
       let memories = {};
-      
-      // Busca as memórias da IA deste cliente
       if (isSupabaseConfigured) {
         const { data } = await supabase
           .from('ai_memories')
           .select('key, value')
           .eq('client_id', client.id);
-          
+
         if (data) {
           data.forEach(m => {
             memories[m.key] = m.value;
@@ -142,31 +98,30 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         title: `Hub: ${client.name}`,
         data: {
           client,
-          ai_memories: memories, // Injeta as memórias permanentemente no prompt!
+          ai_memories: memories,
           reportei_linked: !!client.reportei_config?.project_id,
           reportei_id: client.reportei_config?.project_id
         }
       });
     }
-    
+
     updateContext();
   }, [client, setContext]);
 
   const tabs = [
     { id: 'overview', label: 'Geral', icon: LayoutDashboard },
-    { id: 'dna', label: 'DNA da Marca', icon: Target },
-    { id: 'roadmap', label: 'Estratégia', icon: TrendingIcon },
+    ...(!isPortal ? [{ id: 'onboarding', label: 'Onboarding & DNA', icon: Rocket }] : []),
+    { id: 'brand', label: 'Brand Kit', icon: Palette },
     { id: 'production', label: 'Produção', icon: Kanban },
     { id: 'reports', label: 'Relatórios', icon: BarChart2 },
     { id: 'approvals', label: 'Review Center', icon: CheckCircle2 },
-    { id: 'meetings', label: 'Atas & Decisões', icon: MessageSquare },
-    { id: 'assets', label: 'Dados & Social', icon: Share2 },
-    { id: 'vault', label: 'Cofre Seguro', icon: Lock },
+    { id: 'assets', label: 'Dados & Links', icon: Share2 },
     ...(!isPortal ? [{ id: 'brain', label: 'Cérebro IA', icon: Bot }] : []),
     ...(!isPortal ? [{ id: 'profitability', label: 'Rentabilidade', icon: CircleDollarSign }] : []),
-    ...(!isPortal ? [{ id: 'onboarding', label: 'Onboarding', icon: Rocket }] : []),
-    ...(!isPortal ? [{ id: 'governance', label: 'Governança & Ritos', icon: Shield }] : []),
+    { id: 'vault', label: 'Acessos', icon: Lock },
   ];
+
+  const brandKit = getClientBrandKit(client);
 
   const handleGenerateWhatsAppReport = () => {
     const pendingApproval = tasks.filter(t => t.status === 'aguardando-cliente' || t.status === 'aprovacao-cliente');
@@ -177,7 +132,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     msg += `Olá, ${client?.contact_name || 'equipe'}! Segue o resumo das entregas desta semana:\n\n`;
 
     if (pendingApproval.length > 0) {
-      msg += `*⏳ Aguardando Sua Aprovação:*\n`;
+      msg += `*Aguardando Sua Aprovação:*\n`;
       pendingApproval.forEach(t => {
         msg += `• ${t.title} (Link: ${window.location.origin}/aprovar/${t.id})\n`;
       });
@@ -185,7 +140,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     }
 
     if (inProgress.length > 0) {
-      msg += `*🚀 Em Produção / Criação:*\n`;
+      msg += `*Em Produção / Criação:*\n`;
       inProgress.forEach(t => {
         const deadlineStr = t.deadline ? ` (Prazo: ${new Date(t.deadline).toLocaleDateString('pt-BR')})` : '';
         msg += `• ${t.title}${deadlineStr}\n`;
@@ -194,7 +149,7 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
     }
 
     if (done.length > 0) {
-      msg += `*✅ Concluído Recentemente:*\n`;
+      msg += `*Concluído Recentemente:*\n`;
       done.slice(0, 5).forEach(t => {
         msg += `• ${t.title}\n`;
       });
@@ -210,58 +165,61 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
   return (
     <div className="flex flex-col h-full bg-cs-bg animate-in fade-in slide-in-from-right-4 duration-500">
       {/* Header */}
-      <div className="bg-cs-surface border-b border-cs-border px-8 py-6 shrink-0">
-        <div className="flex items-center justify-between mb-6">
+      <div className="bg-cs-surface border-b border-cs-border px-6 sm:px-8 py-6 shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-4">
             {!isPortal && (
-              <button 
+              <button
+                type="button"
                 onClick={onBack}
-                className="p-2 hover:bg-cs-bg border border-cs-border rounded-lg text-cs-text-secondary hover:text-white transition-colors"
+                className="p-2 hover:bg-cs-bg border border-cs-border rounded-lg text-cs-text-secondary hover:text-white transition-colors cursor-pointer"
               >
                 <ArrowLeft size={18} />
               </button>
             )}
-            <div 
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg"
-              style={{ backgroundColor: client?.brand_color || '#3b82f6' }}
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg overflow-hidden"
+              style={{ backgroundColor: brandKit.primary_color }}
             >
-              {client?.name ? client.name.charAt(0) : 'C'}
+              {brandKit.logo_url && /^https?:\/\//i.test(brandKit.logo_url) ? (
+                <img src={brandKit.logo_url} alt={client?.name} className="w-full h-full object-cover" />
+              ) : (
+                client?.name ? client.name.charAt(0) : 'C'
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold text-white">{client?.name || 'Novo Cliente'}</h2>
-                <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20 uppercase">Ativo</span>
+                <h2 className="text-xl sm:text-2xl font-bold text-white">{client?.name || 'Cliente'}</h2>
+                <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20 uppercase">
+                  {client?.status === 'inactive' ? 'Inativo' : 'Ativo'}
+                </span>
               </div>
-              <p className="text-cs-text-secondary text-sm">
+              <p className="text-cs-text-secondary text-xs sm:text-sm">
                 {client?.contact_name || 'Sem contato'} {client?.contact_email ? `• ${client.contact_email}` : ''}
               </p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-3">
-            {isPortal ? (
-              <button className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-lg shadow-cs-primary/20">
-                <MessageSquare size={16} /> Suporte Agência
-              </button>
-            ) : (
+
+          <div className="flex flex-wrap items-center gap-3">
+            {!isPortal && (
               <>
-                <button 
+                <button
+                  type="button"
                   onClick={handleGenerateWhatsAppReport}
-                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 shadow-sm"
-                  title="Gerar e copiar resumo semanal formatado para WhatsApp"
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  <MessageSquare size={16} /> Relatório WhatsApp
+                  <MessageSquare size={15} /> Relatório WhatsApp
                 </button>
                 {role === 'admin' && !isDemoMode && (
-                  <button type="button" onClick={() => setShowInvite(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-sm font-medium">
+                  <button type="button" onClick={() => setShowInvite(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer">
                     Convidar cliente
                   </button>
                 )}
-                <button onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                  <Settings size={16} /> Configurar
+                <button type="button" onClick={() => setShowConfigModal(true)} className="bg-cs-surface-hover border border-cs-border text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer">
+                  <Settings size={15} /> Configurar
                 </button>
-                <button onClick={() => setShowNewDemand(true)} className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-lg shadow-cs-primary/20">
-                  <Plus size={16} /> Nova Demanda
+                <button type="button" onClick={() => setShowNewDemand(true)} className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-colors flex items-center gap-2 shadow-lg shadow-cs-primary/20 cursor-pointer">
+                  <Plus size={15} /> Nova Demanda
                 </button>
               </>
             )}
@@ -269,22 +227,23 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
         </div>
 
         {/* Tabs Navigation */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all relative overflow-hidden group",
-                activeTab === tab.id 
-                  ? "text-cs-primary bg-cs-primary/5" 
-                  : "text-cs-text-secondary hover:text-white hover:bg-cs-bg"
+                'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all relative whitespace-nowrap cursor-pointer',
+                activeTab === tab.id
+                  ? 'text-cs-primary bg-cs-primary/5'
+                  : 'text-cs-text-secondary hover:text-white hover:bg-cs-bg'
               )}
             >
-              <tab.icon size={16} />
+              <tab.icon size={15} />
               {tab.label}
               {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cs-primary animate-in zoom-in duration-300" />
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cs-primary" />
               )}
             </button>
           ))}
@@ -292,51 +251,77 @@ export default function ClientWorkspace({ client: initialClient, onBack, viewMod
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-        {/* Visual Lifecycle Stepper - Always visible on top of General/Roadmap */}
-        {(activeTab === 'overview' || activeTab === 'roadmap') && (
-          <ClientLifecycle currentStage={client.lifecycle_stage || 'performance'} />
+      <div className="flex-1 overflow-y-auto p-6 sm:p-8 custom-scrollbar">
+        {activeTab === 'overview' && (
+          <>
+            <ClientLifecycle
+              currentStage={client.lifecycle_stage || 'onboarding'}
+              onStageChange={!isPortal ? async (stageId) => {
+                const updated = await handleUpdateClient({ ...client, lifecycle_stage: stageId });
+                if (updated) toast.success('Estágio do cliente atualizado.');
+              } : undefined}
+            />
+            <OverviewTab
+              client={client}
+              invoices={clientInvoices}
+              tasks={tasks}
+              onOpenTab={setActiveTab}
+              onOpenTask={(t) => setSelectedTaskId(t.id)}
+            />
+          </>
         )}
-
-        {activeTab === 'overview' && <OverviewTab client={client} isPortal={isPortal} invoices={clientInvoices} tasks={tasks} />}
-        {activeTab === 'dna' && (
-          <DNATab client={client} createTask={createTask} onUpdateClient={handleUpdateClient} />
+        {activeTab === 'onboarding' && !isPortal && (
+          <OnboardingModule client={client} onUpdateClient={handleUpdateClient} />
         )}
-        {activeTab === 'roadmap' && <StrategicRoadmap clientId={client.id} client={client} />}
-        {activeTab === 'production' && <ProductionTab client={client} tasks={tasks} />}
-        {activeTab === 'reports' && (
-          <div className="p-12 text-center bg-cs-surface border border-cs-border rounded-3xl">
-             <BarChart2 size={48} className="mx-auto text-cs-text-secondary opacity-20 mb-4" />
-             <h3 className="text-white font-bold mb-2">Relatórios em Preparação</h3>
-             <p className="text-xs text-cs-text-secondary">Estamos processando os dados do último período para você.</p>
-          </div>
+        {activeTab === 'brand' && (
+          <BrandKitEditor
+            client={client}
+            onSave={handleUpdateClient}
+            onOpenOnboarding={!isPortal ? () => setActiveTab('onboarding') : undefined}
+          />
         )}
+        {activeTab === 'production' && (
+          <ProductionTab
+            tasks={tasks}
+            onOpenTask={(t) => setSelectedTaskId(t.id)}
+            onUpdateTask={updateTask}
+            onNewDemand={!isPortal ? () => setShowNewDemand(true) : undefined}
+          />
+        )}
+        {activeTab === 'reports' && <ClientReportsTab client={client} tasks={tasks} />}
         {activeTab === 'approvals' && <ApprovalsTab client={client} />}
-        {activeTab === 'meetings' && <MeetingMinutes clientId={client.id} />}
         {activeTab === 'assets' && <AssetsTab client={client} />}
-        {activeTab === 'vault' && <VaultTab client={client} isPortal={isPortal} />}
         {activeTab === 'brain' && !isPortal && <AIBrainModule client={client} />}
-        {activeTab === 'profitability' && <ProfitabilityTab client={client} tasks={tasks} />}
-        {activeTab === 'onboarding' && !isPortal && <OnboardingModule client={client} onUpdateClient={handleUpdateClient} />}
-        {activeTab === 'governance' && !isPortal && <GovernanceModule client={client} />}
+        {activeTab === 'profitability' && !isPortal && <ProfitabilityTab client={client} tasks={tasks} />}
+        {activeTab === 'vault' && <VaultTab client={client} />}
       </div>
 
       {showInvite && <ClientInvite client={client} createUser={createUser} onClose={() => setShowInvite(false)} />}
 
       {showConfigModal && (
-        <ClientConfigModal 
-          client={client} 
-          onClose={() => setShowConfigModal(false)} 
-          onSave={handleUpdateClient} 
+        <ClientConfigModal
+          client={client}
+          onClose={() => setShowConfigModal(false)}
+          onSave={handleUpdateClient}
         />
       )}
 
-      {showNPS && <NPSModal onScore={(s) => { console.log('NPS:', s); setShowNPS(false); }} />}
       {showNewDemand && (
-        <NewTaskModal 
-          onClose={() => setShowNewDemand(false)} 
+        <NewTaskModal
+          onClose={() => setShowNewDemand(false)}
           onSave={createTask}
           initialClient={client}
+        />
+      )}
+
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={updateTask}
+          onAddComment={addComment}
+          onToggleChecklist={toggleChecklist}
+          user={profile || { name: 'Bruno', role }}
         />
       )}
     </div>
@@ -396,244 +381,175 @@ function ClientInvite({ client, createUser, onClose }) {
   );
 }
 
-// --- SUB-COMPONENTS FOR TABS ---
-
-function OverviewTab({ client, isPortal, dashboard, invoices = [], tasks = [] }) {
-  const [liveMetrics, setLiveMetrics] = useState(null);
-
-  useEffect(() => {
-    if (client.reportei_config?.project_id) {
-      reportei.getMetrics(client.reportei_config.project_id).then(setLiveMetrics);
-    }
-  }, [client]);
-
+function OverviewTab({ client, invoices = [], tasks = [], onOpenTab, onOpenTask }) {
+  const kit = getClientBrandKit(client);
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="md:col-span-2 space-y-6">
-        {/* Live Performance - REAL TIME FROM REPORTEI */}
-        {client.reportei_config?.project_id && (
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 relative overflow-hidden group">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-white font-bold flex items-center gap-2">
-                <Zap size={18} className="text-cs-accent animate-pulse" /> Performance Live (Reportei)
-              </h3>
-              <span className="text-[10px] text-cs-text-secondary font-mono">LIVE SYNC ACTIVE</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-cs-bg border border-cs-border rounded-xl p-4 group-hover:border-cs-primary transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                   <Camera size={14} className="text-pink-500" />
-                   <span className="text-[10px] text-cs-text-secondary font-bold uppercase">Redes Sociais</span>
-                </div>
-                <div className="text-lg font-bold text-white">
-                  {typeof liveMetrics?.instagram?.followers === 'number' 
-                    ? liveMetrics.instagram.followers.toLocaleString() 
-                    : '---'}
-                </div>
-                <p className="text-[10px] text-cs-text-secondary mt-1">Seguidores Totais</p>
-              </div>
-              
-              <div className="bg-cs-bg border border-cs-border rounded-xl p-4 group-hover:border-cs-primary transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                   <TrendingIcon size={14} className="text-blue-500" />
-                   <span className="text-[10px] text-cs-text-secondary font-bold uppercase">Meta Ads</span>
-                </div>
-                <div className="text-lg font-bold text-white">
-                  R$ {typeof liveMetrics?.facebook_ads?.spend === 'number' 
-                    ? liveMetrics.facebook_ads.spend.toLocaleString() 
-                    : '---'}
-                </div>
-                <p className="text-[10px] text-green-400 font-bold mt-1">{liveMetrics?.facebook_ads?.conversions || 0} Conversões</p>
-              </div>
-
-              <div className="bg-cs-bg border border-cs-border rounded-xl p-4 group-hover:border-cs-primary transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                   <Globe size={14} className="text-cs-primary" />
-                   <span className="text-[10px] text-cs-text-secondary font-bold uppercase">Google Ads</span>
-                </div>
-                <div className="text-lg font-bold text-white">
-                  R$ {typeof liveMetrics?.google_ads?.spend === 'number' 
-                    ? liveMetrics.google_ads.spend.toLocaleString() 
-                    : '---'}
-                </div>
-                <p className="text-[10px] text-cs-text-secondary mt-1">{liveMetrics?.google_ads?.clicks || 0} Cliques</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Active Campaigns - Portal Only */}
-        {isPortal && dashboard?.campaigns?.length > 0 && (
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-              <TrendingIcon size={18} className="text-green-400" /> Campanhas Ativas
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-white font-bold flex items-center gap-2">
+              <Palette size={17} className="text-cs-primary" /> Resumo de Identidade & Estratégia
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {(dashboard?.campaigns || []).map((c, i) => (
-                <div key={i} className="bg-cs-bg border border-cs-border rounded-xl p-4">
-                  <p className="text-[10px] text-cs-text-secondary uppercase font-bold mb-1">{c.name}</p>
-                  <div className="flex justify-between items-end">
-                    <div className="text-lg font-bold text-white">R$ {c.spent?.toLocaleString()}</div>
-                    <div className="text-xs text-green-400 font-bold">ROAS {c.roas}x</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <button type="button" onClick={() => onOpenTab('brand')} className="text-xs font-bold text-cs-primary hover:underline cursor-pointer">
+              Editar Brand Kit
+            </button>
           </div>
-        )}
 
-        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-            <Plus size={18} className="text-cs-primary" /> {isPortal ? 'Minhas Entregas' : 'Projetos em Destaque'}
-          </h3>
-          <div className="space-y-4">
-            {(isPortal ? (dashboard?.nextDeliveries || []) : tasks.slice(0, 4)).map((p, i) => (
-              <div key={i} className="bg-cs-bg border border-cs-border rounded-xl p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="text-white font-medium text-sm">{p.title || p.name}</h4>
-                    <p className="text-[10px] text-cs-text-secondary mt-0.5">Prazo: {p.deadline ? new Date(p.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</p>
-                  </div>
-                  <span className={cn(
-                    "px-2 py-0.5 rounded text-[10px] font-bold capitalize border",
-                    (p.status === 'concluido' || p.status === 'Finalizado') ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-cs-primary/10 text-cs-primary border-cs-primary/20"
-                  )}>
-                    {p.status?.replace('-', ' ')}
-                  </span>
-                </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {[
+              { label: 'Primária', hex: kit.primary_color },
+              { label: 'Secundária', hex: kit.secondary_color },
+              { label: 'Destaque', hex: kit.accent_color },
+            ].map(c => (
+              <div key={c.label} className="flex items-center gap-2 bg-cs-bg border border-cs-border px-3 py-1.5 rounded-xl text-xs">
+                <span className="w-3.5 h-3.5 rounded-full border border-white/20" style={{ backgroundColor: c.hex }} />
+                <span className="text-cs-text-secondary">{c.label}:</span>
+                <span className="font-mono text-white uppercase">{c.hex}</span>
               </div>
             ))}
-            {!isPortal && tasks.length === 0 && (
-              <p className="text-[10px] text-cs-text-secondary text-center py-4">Nenhuma tarefa aberta recentemente.</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="bg-cs-bg border border-cs-border rounded-xl p-3">
+              <span className="text-cs-text-secondary block mb-1">Tipografia</span>
+              <span className="text-white font-semibold">{kit.typography || 'Não configurada'}</span>
+            </div>
+            <div className="bg-cs-bg border border-cs-border rounded-xl p-3">
+              <span className="text-cs-text-secondary block mb-1">Tom de Voz</span>
+              <span className="text-white font-semibold">{kit.tone_of_voice || 'Não configurado'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-bold flex items-center gap-2">
+              <Kanban size={18} className="text-cs-primary" /> Tarefas em Andamento ({tasks.length})
+            </h3>
+            <button
+              type="button"
+              onClick={() => onOpenTab('production')}
+              className="text-xs font-bold text-cs-primary hover:underline cursor-pointer"
+            >
+              Ver todas
+            </button>
+          </div>
+          <div className="space-y-3">
+            {tasks.slice(0, 5).map((p, i) => (
+              <button
+                key={p.id || i}
+                type="button"
+                onClick={() => onOpenTask?.(p)}
+                className="w-full text-left bg-cs-bg border border-cs-border hover:border-cs-primary/40 rounded-xl p-4 flex justify-between items-start gap-3 transition-colors cursor-pointer"
+              >
+                <div>
+                  <h4 className="text-white font-medium text-sm">{p.title}</h4>
+                  <p className="text-[11px] text-cs-text-secondary mt-0.5">
+                    Prazo: {p.deadline ? new Date(p.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}
+                  </p>
+                </div>
+                <span className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-bold capitalize border shrink-0',
+                  p.status === 'concluido' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-cs-primary/10 text-cs-primary border-cs-primary/20'
+                )}>
+                  {p.status?.replace('-', ' ')}
+                </span>
+              </button>
+            ))}
+            {tasks.length === 0 && (
+              <p className="text-xs text-cs-text-secondary text-center py-4">Nenhuma tarefa registrada para esta conta.</p>
             )}
           </div>
         </div>
       </div>
 
-      <div className="space-y-6">
-        {/* Live Metrics - Portal Only */}
-        {isPortal && (
-          <div className="bg-gradient-to-br from-cs-primary/20 to-cs-bg border border-cs-primary/30 rounded-2xl p-6">
-            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-              <Clock size={18} /> Time Tracking
-            </h3>
-            <div className="text-3xl font-bold text-white mb-1">{dashboard?.monthlyHours || 0}h</div>
-            <p className="text-xs text-cs-text-secondary mb-4">Investidas este mês no seu projeto.</p>
-            <div className="w-full h-1.5 bg-cs-bg rounded-full overflow-hidden">
-              <div className="h-full bg-cs-primary" style={{ width: '65%' }}></div>
-            </div>
-          </div>
-        )}
+      <div className="space-y-4">
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
+          <p className="text-cs-text-secondary text-xs mb-1">Fee Mensal</p>
+          <p className="text-xl font-bold text-white">R$ {Number(client.monthly_fee || 0).toLocaleString('pt-BR')}</p>
+          <p className="text-[11px] text-cs-text-secondary mt-1">
+            Vencimento: dia {client.billing_day || '10'} · {client.monthly_hours_contracted || 10}h/mês
+          </p>
+        </div>
 
-        <div className="grid grid-cols-1 gap-4">
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-            <p className="text-cs-text-secondary text-xs mb-1">Última Aprovação</p>
-            <p className="text-white font-bold">
-              {isPortal && dashboard?.approvals?.[0] ? dashboard.approvals[0].item : 'Nenhuma este mês'}
-            </p>
-            <p className="text-[10px] text-green-400 mt-1">Aprovado recentemente</p>
-          </div>
-          
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-            <p className="text-cs-text-secondary text-xs mb-1">Fee Mensal</p>
-            <p className="text-white font-bold">R$ {client.monthly_fee?.toLocaleString('pt-BR')}</p>
-            <p className="text-[10px] text-cs-text-secondary mt-1">Status: Regular</p>
-          </div>
-
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-            <p className="text-cs-text-secondary text-xs mb-3 flex items-center gap-1.5 font-bold uppercase tracking-wider">
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-cs-text-secondary text-xs flex items-center gap-1.5 font-bold uppercase tracking-wider">
               <CircleDollarSign size={14} className="text-green-400" /> Cobranças Recentes
             </p>
-            <div className="space-y-2">
-              {invoices.slice(0, 3).map((inv, idx) => (
-                <div key={inv.id || idx} className="flex justify-between items-center bg-cs-bg/50 p-2.5 border border-cs-border rounded-xl">
-                  <div className="min-w-0">
-                    <p className="text-white font-medium text-xs truncate max-w-[130px]">{inv.service}</p>
-                    <p className="text-[9px] text-cs-text-secondary mt-0.5">Vencimento: {inv.due_date ? new Date(inv.due_date).toLocaleDateString('pt-BR') : '---'}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-white font-bold text-xs">R$ {inv.amount?.toLocaleString('pt-BR')}</p>
-                    <span className={cn(
-                      "text-[8px] font-bold px-1.5 py-0.2 rounded border inline-block mt-0.5 capitalize",
-                      inv.status === 'paid' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                      inv.status === 'pending' ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
-                      "bg-red-500/10 text-red-400 border-red-500/20"
-                    )}>
-                      {inv.status === 'paid' ? 'Pago' : inv.status === 'pending' ? 'Pendente' : 'Atrasado'}
-                    </span>
-                  </div>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('csag:navigate', { detail: { view: 'financeiro', clientId: client.id } }))}
+              className="text-[11px] font-bold text-cs-primary hover:underline cursor-pointer"
+            >
+              Abrir Financeiro
+            </button>
+          </div>
+          <div className="space-y-2">
+            {invoices.slice(0, 4).map((inv, idx) => (
+              <div key={inv.id || idx} className="flex justify-between items-center bg-cs-bg/50 p-2.5 border border-cs-border rounded-xl">
+                <div className="min-w-0">
+                  <p className="text-white font-medium text-xs truncate max-w-[130px]">{inv.service}</p>
+                  <p className="text-[10px] text-cs-text-secondary mt-0.5">
+                    {inv.due_date ? new Date(inv.due_date).toLocaleDateString('pt-BR') : 'Sem data'}
+                  </p>
                 </div>
-              ))}
-              {invoices.length === 0 && (
-                <p className="text-[10px] text-cs-text-secondary text-center py-2">Nenhuma cobrança registrada.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StrategyTab({ client }) {
-  return (
-    <div className="max-w-4xl space-y-8">
-      <section>
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <Target size={20} className="text-cs-primary" /> Planejamento Estratégico
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-            <h4 className="text-white text-sm font-bold mb-3">Diferenciais da Marca</h4>
-            <ul className="text-xs text-cs-text-secondary space-y-2 list-disc pl-4">
-              <li>Produção 100% nacional e artesanal.</li>
-              <li>Matéria-prima certificada ecologicamente.</li>
-              <li>Atendimento personalizado VIP.</li>
-            </ul>
-          </div>
-          <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-            <h4 className="text-white text-sm font-bold mb-3">Objetivos do Semestre</h4>
-            <ul className="text-xs text-cs-text-secondary space-y-2 list-disc pl-4">
-              <li>Aumentar base de leads em 40%.</li>
-              <li>Consolidar presença no Instagram e TikTok.</li>
-              <li>Lançamento da nova linha premium em Junho.</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <h4 className="text-white text-sm font-bold mb-4">Assets da Marca</h4>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {['Logo Principal', 'Logo Secundário', 'Manual da Marca', 'Banco de Fotos'].map((item, i) => (
-            <div key={i} className="bg-cs-surface border border-cs-border rounded-xl p-4 flex flex-col items-center justify-center text-center group hover:border-cs-primary transition-colors cursor-pointer">
-              <div className="w-10 h-10 rounded-lg bg-cs-bg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                <FileText size={20} className="text-cs-text-secondary group-hover:text-cs-primary" />
+                <div className="text-right shrink-0">
+                  <p className="text-white font-bold text-xs">R$ {Number(inv.amount || 0).toLocaleString('pt-BR')}</p>
+                  <span className={cn(
+                    'text-[9px] font-bold px-1.5 py-0.5 rounded border inline-block mt-0.5 capitalize',
+                    inv.status === 'paid' ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                      : inv.status === 'pending' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                        : 'bg-red-500/10 text-red-400 border-red-500/20'
+                  )}>
+                    {inv.status === 'paid' ? 'Pago' : inv.status === 'pending' ? 'Pendente' : 'Atrasado'}
+                  </span>
+                </div>
               </div>
-              <span className="text-xs text-white font-medium">{item}</span>
-              <button className="mt-3 text-[10px] text-cs-primary flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                Abrir <ExternalLink size={10} />
-              </button>
-            </div>
-          ))}
+            ))}
+            {invoices.length === 0 && (
+              <p className="text-xs text-cs-text-secondary text-center py-2">Nenhuma cobrança registrada.</p>
+            )}
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
 
-function ProductionTab({ client, tasks = [] }) {
+function ProductionTab({ tasks = [], onOpenTask, onUpdateTask, onNewDemand }) {
+  const STATUS_OPTIONS = [
+    { id: 'backlog', label: 'Backlog' },
+    { id: 'briefing', label: 'Briefing' },
+    { id: 'em-producao', label: 'Em Produção' },
+    { id: 'revisao-interna', label: 'Revisão Interna' },
+    { id: 'aguardando-cliente', label: 'Aguard. Cliente' },
+    { id: 'ajustes', label: 'Ajustes' },
+    { id: 'concluido', label: 'Concluído' },
+  ];
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-white">Fluxo de Entrega</h3>
-        <div className="flex gap-2">
-          <span className="px-3 py-1 bg-cs-surface border border-cs-border rounded-full text-xs text-cs-text-secondary">Total: {tasks.length} tarefas</span>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-bold text-white">Fluxo de Entrega</h3>
+          <span className="px-3 py-1 bg-cs-surface border border-cs-border rounded-full text-xs text-cs-text-secondary">
+            Total: {tasks.length} tarefas
+          </span>
         </div>
+        {onNewDemand && (
+          <button
+            type="button"
+            onClick={onNewDemand}
+            className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus size={14} /> Nova Demanda
+          </button>
+        )}
       </div>
-      
-      <div className="bg-cs-surface border border-cs-border rounded-2xl overflow-hidden shadow-2xl">
+
+      <div className="bg-cs-surface border border-cs-border rounded-2xl overflow-x-auto shadow-2xl">
         <table className="w-full text-left">
           <thead>
             <tr className="border-b border-cs-border text-[10px] text-cs-text-secondary uppercase tracking-widest bg-cs-bg/50">
@@ -645,22 +561,42 @@ function ProductionTab({ client, tasks = [] }) {
           </thead>
           <tbody className="text-xs text-cs-text-primary">
             {tasks.map((row, i) => (
-              <tr key={row.id || i} className="border-b border-cs-border/50 hover:bg-white/5 transition-colors">
+              <tr
+                key={row.id || i}
+                onClick={() => onOpenTask?.(row)}
+                className="border-b border-cs-border/50 hover:bg-white/5 transition-colors cursor-pointer"
+              >
                 <td className="px-6 py-4 font-medium text-white">{row.title}</td>
-                <td className="px-6 py-4">
-                  <span className={cn(
-                    "px-2 py-0.5 rounded-full text-[10px] border capitalize",
-                    row.status === 'concluido' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                    row.status === 'em-producao' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
-                    row.status === 'aguardando-cliente' ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
-                    row.status === 'ajustes' ? "bg-red-500/10 text-red-400 border-red-500/20" :
-                    "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                  )}>
-                    {row.status?.replace('-', ' ')}
-                  </span>
+                <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
+                  {onUpdateTask ? (
+                    <select
+                      aria-label={`Status de ${row.title}`}
+                      value={row.status || 'backlog'}
+                      onChange={e => onUpdateTask({ id: row.id, status: e.target.value })}
+                      className={cn(
+                        'px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-cs-bg focus:outline-none focus:border-cs-primary cursor-pointer',
+                        row.status === 'concluido' ? 'text-green-400 border-green-500/30'
+                          : row.status === 'em-producao' ? 'text-purple-400 border-purple-500/30'
+                            : row.status === 'aguardando-cliente' ? 'text-yellow-400 border-yellow-500/30'
+                              : row.status === 'ajustes' ? 'text-red-400 border-red-500/30'
+                                : 'text-zinc-300 border-cs-border'
+                      )}
+                    >
+                      {STATUS_OPTIONS.map(opt => (
+                        <option key={opt.id} value={opt.id} className="bg-cs-bg text-white">{opt.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className={cn(
+                      'px-2 py-0.5 rounded-full text-[10px] border capitalize',
+                      row.status === 'concluido' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
+                    )}>
+                      {row.status?.replace('-', ' ')}
+                    </span>
+                  )}
                 </td>
                 <td className="px-6 py-4">{row.assigned_to || 'Sem responsável'}</td>
-                <td className="px-6 py-4">{row.deadline ? new Date(row.deadline).toLocaleDateString('pt-BR') : '---'}</td>
+                <td className="px-6 py-4">{row.deadline ? new Date(row.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</td>
               </tr>
             ))}
             {tasks.length === 0 && (
@@ -672,6 +608,89 @@ function ProductionTab({ client, tasks = [] }) {
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function ClientReportsTab({ client, tasks = [] }) {
+  const { allPosts, metrics, loading: socialLoading } = useSocialManagement();
+  const { reports, loading: mediaLoading } = useCampaignManagement();
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  const clientMetrics = metrics.filter(m => areIdsMatching(m.client_id, client.id, '', client.name));
+  const latestOrganic = clientMetrics.find(m => m.period_month === currentMonth) || clientMetrics[0];
+  const clientMedia = reports.filter(r => areIdsMatching(r.client_id, client.id, '', client.name));
+  const publishedCount = allPosts.filter(p => areIdsMatching(p.client_id, client.id, '', client.name) && p.status === 'publicado').length;
+  const completedCount = tasks.filter(t => t.status === 'concluido').length;
+
+  const openModuleForClient = (view) => {
+    window.dispatchEvent(new CustomEvent('csag:navigate', { detail: { view, clientId: client.id } }));
+  };
+
+  if (socialLoading || mediaLoading) {
+    return <p className="text-sm text-cs-text-secondary py-8">Carregando indicadores da conta...</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-cs-surface border border-cs-border rounded-2xl p-4">
+        <span className="text-xs text-cs-text-secondary">
+          Ações rápidas para consolidar dados e enviar prestação de contas de <strong className="text-white">{client.name}</strong>:
+        </span>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => openModuleForClient('relatorios')} className="bg-cs-primary text-black px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer">
+            Abrir Relatório Mensal
+          </button>
+          <button type="button" onClick={() => openModuleForClient('buzzmonitor')} className="bg-cs-bg border border-cs-border hover:border-cs-primary/40 text-white px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer">
+            Abrir Social & Conteúdo
+          </button>
+          <button type="button" onClick={() => openModuleForClient('midia')} className="bg-cs-bg border border-cs-border hover:border-cs-primary/40 text-white px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer">
+            Abrir Mídia Paga
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
+          <span className="text-[10px] font-bold text-cs-text-secondary uppercase">Entregas Concluídas</span>
+          <p className="text-2xl font-bold text-white mt-1">{completedCount}</p>
+          <p className="text-xs text-cs-text-secondary mt-1">De {tasks.length} tarefas registradas</p>
+        </div>
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
+          <span className="text-[10px] font-bold text-cs-text-secondary uppercase">Posts Publicados</span>
+          <p className="text-2xl font-bold text-white mt-1">{publishedCount}</p>
+          <p className="text-xs text-cs-text-secondary mt-1">Registrados na grade editorial</p>
+        </div>
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
+          <span className="text-[10px] font-bold text-cs-text-secondary uppercase">Seguidores / Alcance</span>
+          <p className="text-2xl font-bold text-white mt-1">
+            {latestOrganic ? Number(latestOrganic.followers_total || 0).toLocaleString('pt-BR') : 'Sem lançamento'}
+          </p>
+          <p className="text-xs text-cs-text-secondary mt-1">
+            {latestOrganic ? `Período ${latestOrganic.period_month}` : 'Lance fechamentos em Social & Conteúdo'}
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 space-y-4">
+        <h3 className="text-base font-bold text-white">Prestações de Contas de Mídia Paga ({clientMedia.length})</h3>
+        {clientMedia.length === 0 ? (
+          <p className="text-xs text-cs-text-secondary">Nenhum relatório mensal de mídia paga lançado para esta conta.</p>
+        ) : (
+          <div className="space-y-3">
+            {clientMedia.map(rep => (
+              <div key={rep.id} className="bg-cs-bg border border-cs-border rounded-xl p-4 space-y-1">
+                <div className="flex justify-between items-center text-xs">
+                  <strong className="text-white">{rep.period_label}</strong>
+                  <span className="text-emerald-400 font-mono">
+                    R$ {Number(rep.invested_amount || 0).toLocaleString('pt-BR')} · {rep.conversions_count || 0} conversões
+                  </span>
+                </div>
+                {rep.diagnosis && <p className="text-xs text-cs-text-secondary">{rep.diagnosis}</p>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -697,7 +716,7 @@ function ApprovalsTab({ client }) {
   const currentTask = clientTasks.find(t => t.id === selectedTaskId) || displayTasks[0];
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-cs-surface border border-cs-border rounded-2xl p-6 shadow-xl">
         <div>
           <h3 className="text-white font-bold text-lg mb-1 flex items-center gap-2">
@@ -706,7 +725,7 @@ function ApprovalsTab({ client }) {
           <p className="text-cs-text-secondary text-xs">Envie versões e consulte o histórico de decisões do cliente.</p>
         </div>
       </div>
-      
+
       {displayTasks.length === 0 ? (
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-12 text-center">
           <CheckCircle2 size={48} className="mx-auto mb-4 text-cs-primary/30" />
@@ -715,36 +734,38 @@ function ApprovalsTab({ client }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* List of reviewable tasks */}
           <div className="lg:col-span-4 space-y-3">
             <h4 className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest px-1">Demandas da Conta</h4>
             {displayTasks.map(t => (
-              <div 
+              <div
                 key={t.id}
                 onClick={() => setSelectedTaskId(t.id)}
                 className={cn(
-                  "p-4 rounded-2xl border transition-all cursor-pointer",
-                  (currentTask?.id === t.id)
-                    ? "bg-cs-surface border-cs-primary shadow-lg shadow-cs-primary/10"
-                    : "bg-cs-surface/40 border-cs-border hover:border-cs-primary/40 text-cs-text-secondary"
+                  'p-4 rounded-2xl border transition-all cursor-pointer',
+                  currentTask?.id === t.id
+                    ? 'bg-cs-surface border-cs-primary shadow-lg shadow-cs-primary/10'
+                    : 'bg-cs-surface/40 border-cs-border hover:border-cs-primary/40 text-cs-text-secondary'
                 )}
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className={cn(
-                    "text-[10px] font-bold px-2 py-0.5 rounded uppercase border",
-                    t.status === 'aguardando-cliente' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
-                    t.status === 'concluido' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                    "bg-cs-bg text-cs-text-secondary border-cs-border"
+                    'text-[10px] font-bold px-2 py-0.5 rounded uppercase border',
+                    t.status === 'aguardando-cliente' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                      : t.status === 'concluido' ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                        : 'bg-cs-bg text-cs-text-secondary border-cs-border'
                   )}>
                     {t.status}
                   </span>
-                  {t.status === 'aguardando-cliente' && <button
-                    onClick={(e) => { e.stopPropagation(); handleCopyLink(t.id); }}
-                    className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1"
-                    title="Copiar Link de Aprovação"
-                  >
-                    <ExternalLink size={12} />
-                  </button>}
+                  {t.status === 'aguardando-cliente' && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleCopyLink(t.id); }}
+                      className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1 cursor-pointer"
+                      title="Copiar Link de Aprovação"
+                    >
+                      <ExternalLink size={12} />
+                    </button>
+                  )}
                 </div>
                 <h5 className="text-sm font-bold text-white mb-1 line-clamp-1">{t.title}</h5>
                 <p className="text-[10px] text-cs-text-secondary">{t.tag || 'Social Media'} • {t.deadline ? new Date(t.deadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</p>
@@ -752,7 +773,6 @@ function ApprovalsTab({ client }) {
             ))}
           </div>
 
-          {/* Embedded Approval Flow for selected task */}
           <div className="lg:col-span-8 bg-cs-surface border border-cs-border rounded-3xl p-6 shadow-2xl">
             {currentTask ? (
               <div>
@@ -761,20 +781,16 @@ function ApprovalsTab({ client }) {
                     <h4 className="text-lg font-bold text-white">{currentTask.title}</h4>
                     <p className="text-xs text-cs-text-secondary mt-0.5">{currentTask.description || 'Envie e valide entregáveis desta demanda.'}</p>
                   </div>
-                  <a 
-                    href={`/aprovar/${currentTask.id}`} 
-                    target="_blank" 
+                  <a
+                    href={`/aprovar/${currentTask.id}`}
+                    target="_blank"
                     rel="noreferrer"
                     className="text-xs font-bold text-cs-primary hover:underline flex items-center gap-1"
                   >
                     Visualização do Cliente <ExternalLink size={12} />
                   </a>
                 </div>
-                <ApprovalFlow 
-                  taskId={currentTask.id}
-                  userRole="agency"
-                  userId="demo-admin"
-                />
+                <ApprovalFlow taskId={currentTask.id} />
               </div>
             ) : (
               <p className="text-xs text-cs-text-secondary text-center py-12">Selecione uma tarefa ao lado para visualizar os entregáveis.</p>
@@ -787,72 +803,85 @@ function ApprovalsTab({ client }) {
 }
 
 function AssetsTab({ client }) {
-  const safeHandle = client?.handle || ('@' + (client?.name || 'cliente').toLowerCase().replace(/[^a-z0-9]/g, ''));
-  const safeWeb = client?.website || 'https://comunicacaosocialag.com.br';
+  const kit = getClientBrandKit(client);
+  const instagramClean = (kit.instagram || '').replace(/^@/, '').trim();
+  const instagramUrl = instagramClean ? `https://instagram.com/${instagramClean}` : '';
+  const websiteUrl = /^https?:\/\//i.test(kit.website || '') ? kit.website : '';
+  const driveUrl = /^https?:\/\//i.test(kit.drive_url || '') ? kit.drive_url : '';
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <section className="space-y-4">
         <h3 className="text-lg font-bold text-white mb-4">Presença Digital</h3>
         <div className="space-y-3">
           <div className="flex items-center justify-between p-4 bg-cs-surface border border-cs-border rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center shrink-0">
                 <Camera size={20} className="text-pink-500" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-white font-medium">Instagram</p>
-                <p className="text-xs text-cs-text-secondary">{safeHandle}</p>
+                <p className="text-xs text-cs-text-secondary truncate">{instagramClean ? `@${instagramClean}` : 'Não informado'}</p>
               </div>
             </div>
-            <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
+            {instagramUrl && (
+              <a href={instagramUrl} target="_blank" rel="noreferrer" className="text-cs-primary hover:underline text-xs font-bold flex items-center gap-1 shrink-0">
+                Abrir <ExternalLink size={14} />
+              </a>
+            )}
           </div>
+
           <div className="flex items-center justify-between p-4 bg-cs-surface border border-cs-border rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Users size={20} className="text-blue-500" />
-              </div>
-              <div>
-                <p className="text-sm text-white font-medium">Canais Oficiais</p>
-                <p className="text-xs text-cs-text-secondary">{client?.name || 'Marca'}</p>
-              </div>
-            </div>
-            <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
-          </div>
-          <div className="flex items-center justify-between p-4 bg-cs-surface border border-cs-border rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-cs-primary/10 flex items-center justify-center">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-lg bg-cs-primary/10 flex items-center justify-center shrink-0">
                 <Globe size={20} className="text-cs-primary" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-white font-medium">Website Principal</p>
-                <p className="text-xs text-cs-text-secondary">{safeWeb}</p>
+                <p className="text-xs text-cs-text-secondary truncate">{websiteUrl || 'Não informado'}</p>
               </div>
             </div>
-            <button className="text-cs-text-secondary hover:text-white"><ExternalLink size={16} /></button>
+            {websiteUrl && (
+              <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-cs-primary hover:underline text-xs font-bold flex items-center gap-1 shrink-0">
+                Abrir <ExternalLink size={14} />
+              </a>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-cs-surface border border-cs-border rounded-xl">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                <Users size={20} className="text-blue-500" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-white font-medium">Contato Principal</p>
+                <p className="text-xs text-cs-text-secondary truncate">{client?.contact_name || 'Não informado'} {client?.contact_phone ? `• ${client.contact_phone}` : ''}</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="space-y-4">
         <h3 className="text-lg font-bold text-white mb-4">Pastas de Trabalho</h3>
-        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6">
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
               <Share2 size={24} className="text-blue-500" />
             </div>
             <div>
               <h4 className="text-white font-bold text-sm">Google Drive Central</h4>
-              <p className="text-[10px] text-cs-text-secondary">Acesso compartilhado com a equipe</p>
+              <p className="text-[11px] text-cs-text-secondary">Repositório oficial compartilhado com a equipe</p>
             </div>
           </div>
-          {client?.drive_url ? (
-            <a href={client.drive_url} target="_blank" rel="noopener noreferrer" className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
+          {driveUrl ? (
+            <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
               ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
             </a>
           ) : (
-            <button className="w-full bg-cs-bg border border-cs-border hover:border-cs-primary text-white py-3 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-2">
-              ACESSAR DRIVE DO CLIENTE <ExternalLink size={14} />
-            </button>
+            <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              Nenhum link do Google Drive cadastrado ainda. Adicione na aba Brand Kit ou no Onboarding.
+            </p>
           )}
         </div>
       </section>
@@ -860,447 +889,80 @@ function AssetsTab({ client }) {
   );
 }
 
-function DocsTab({ client }) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-        <h3 className="text-white font-bold mb-4">Informações Cadastrais</h3>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-[10px] text-cs-text-secondary uppercase">Documento / Registro</label>
-              <p className="text-sm text-white font-mono">{client?.document_id || '12.345.678/0001-90'}</p>
-            </div>
-            <div>
-              <label className="text-[10px] text-cs-text-secondary uppercase">Razão Social / Nome</label>
-              <p className="text-sm text-white">{client?.name || 'Cliente'}</p>
-            </div>
-          </div>
-          <div>
-            <label className="text-[10px] text-cs-text-secondary uppercase">Localização</label>
-            <p className="text-sm text-white">Poços de Caldas - MG</p>
-          </div>
-        </div>
-      </div>
-      
-      <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-        <h3 className="text-white font-bold mb-4">Contratos e Anexos</h3>
-        <div className="space-y-3">
-          {[
-            { n: `Contrato de Prestação de Serviços 2026 - ${client?.name || 'Cliente'}`, s: '2.4 MB' },
-            { n: 'Manual de Identidade Visual e Compliance', s: '4.5 MB' },
-          ].map((doc, i) => (
-            <div key={i} className="flex items-center justify-between p-3 bg-cs-bg border border-cs-border rounded-lg group hover:border-cs-primary transition-colors">
-              <div className="flex items-center gap-3">
-                <FileText size={16} className="text-cs-text-secondary group-hover:text-cs-primary" />
-                <div>
-                  <p className="text-xs text-white font-medium">{doc.n}</p>
-                  <p className="text-[10px] text-cs-text-secondary">{doc.s}</p>
-                </div>
-              </div>
-              <button className="text-cs-text-secondary hover:text-white"><DownloadIcon size={14} /></button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DownloadIcon({ size }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-  );
-}
-
-function DNATab({ client, createTask, onUpdateClient }) {
-  const [formsLink, setFormsLink] = useState(client.forms_url || '');
-  const [pastedAnswers, setPastedAnswers] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [aiPlan, setAiPlan] = useState('');
-  const [isApproving, setIsApproving] = useState(false);
-  const [isEditingDna, setIsEditingDna] = useState(false);
-  const [dnaForm, setDnaForm] = useState({
-    target_audience: client.target_audience || '',
-    tone_of_voice: client.tone_of_voice || '',
-    strategic_goals: client.strategic_goals || '',
-    value_proposition: client.value_proposition || ''
-  });
-
-  useEffect(() => {
-    setFormsLink(client.forms_url || '');
-    setDnaForm({
-      target_audience: client.target_audience || '',
-      tone_of_voice: client.tone_of_voice || '',
-      strategic_goals: client.strategic_goals || '',
-      value_proposition: client.value_proposition || ''
-    });
-  }, [client]);
-
-  const handleSaveFormsLink = () => {
-    if (onUpdateClient) {
-      onUpdateClient({ ...client, forms_url: formsLink });
-      toast.success('Link do Forms salvo com sucesso!');
-    }
-  };
-
-  const handleSaveDna = () => {
-    if (onUpdateClient) {
-      onUpdateClient({ ...client, ...dnaForm });
-      setIsEditingDna(false);
-      toast.success('Diretrizes de DNA atualizadas com sucesso!');
-    }
-  };
-
-  const copyQuestions = () => {
-    const questions = `1. Qual é a principal dor que o seu produto/serviço resolve hoje?
-2. Cite 3 concorrentes diretos que você admira e 1 que você não gosta (e o porquê).
-3. Se a sua marca fosse uma pessoa famosa, quem seria e por quê?
-4. Quais são os 3 produtos/serviços mais rentáveis (Curva A)?
-5. Quais objeções de vendas sua equipe mais escuta?`;
-    navigator.clipboard.writeText(questions);
-    toast.success('Perguntas copiadas! Cole no seu Google Forms.');
-  };
-
-  const handleAnalyze = async () => {
-    if (!pastedAnswers) return toast.error('Cole as respostas do cliente primeiro.');
-    setIsAnalyzing(true);
-    try {
-      const { text } = await generateStrategicPlan(client, pastedAnswers);
-      setAiPlan(text);
-    } catch (err) {
-      toast.error('Erro ao analisar: ' + err.message);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleApprove = async () => {
-    setIsApproving(true);
-    try {
-      if (isSupabaseConfigured) {
-        const { error } = await supabase.from('ai_memories').upsert({
-          client_id: client.id,
-          key: 'strategic_plan_3months',
-          value: aiPlan
-        }, { onConflict: 'client_id,key' }); // Corrigido onConflict sem espaço
-        
-        if (error) {
-          console.error('Erro no upsert da memória:', error);
-          // Não vamos travar a criação das tarefas se a memória falhar.
-        }
-      }
-
-      const t1 = await createTask({
-        title: 'Mês 1: Setup, Alinhamento e Tração',
-        client_id: client.id,
-        client_name: client.name,
-        status: 'backlog',
-        tag: 'Onboarding',
-        estimated_hours: 10,
-        deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      });
-      if (!t1) throw new Error('A criação da tarefa 1 falhou no banco de dados. Verifique console.');
-
-      const t2 = await createTask({
-        title: 'Mês 2: Escala, Conversão e Otimização',
-        client_id: client.id,
-        client_name: client.name,
-        status: 'backlog',
-        tag: 'Campanhas',
-        estimated_hours: 15,
-        deadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      });
-      if (!t2) throw new Error('A criação da tarefa 2 falhou no banco de dados. Verifique console.');
-
-      const t3 = await createTask({
-        title: 'Mês 3: Retenção, BI e Automação',
-        client_id: client.id,
-        client_name: client.name,
-        status: 'backlog',
-        tag: 'Automação',
-        estimated_hours: 15,
-        deadline: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      });
-      if (!t3) throw new Error('A criação da tarefa 3 falhou no banco de dados. Verifique console.');
-
-      alert('Plano de 3 meses aprovado! Tarefas enviadas para a Produção e Memória salva.');
-      setAiPlan('');
-      setPastedAnswers('');
-    } catch (e) {
-      console.error('Erro completo:', e);
-      alert('Erro ao salvar plano: ' + e.message);
-    } finally {
-      setIsApproving(false);
-    }
-  };
-
-  return (
-    <div className="max-w-5xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* ONBOARDING & BUSINESS CORE */}
-      <section className="bg-cs-surface border border-cs-border rounded-3xl p-8 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-5">
-          <Bot size={120} />
-        </div>
-        <div className="relative z-10">
-          <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-3">
-            <Target size={22} className="text-cs-accent" /> Onboarding & Business Core
-          </h3>
-          <p className="text-sm text-cs-text-secondary mb-8">Gerencie a entrada do cliente, colete respostas do Forms e crie o plano de ação estratégico com IA.</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Esquerda: Forms */}
-            <div className="space-y-6">
-              <div className="bg-cs-bg border border-cs-border rounded-2xl p-6">
-                <h4 className="text-white font-bold mb-4 flex items-center gap-2 text-sm">
-                  <FileText size={16} className="text-blue-400" /> 1. Questionário (Google Forms)
-                </h4>
-                <p className="text-xs text-cs-text-secondary mb-4">Envie o questionário estrutural para o cliente mapear o DNA do negócio.</p>
-                
-                <button onClick={copyQuestions} className="w-full mb-4 bg-cs-surface border border-cs-border hover:border-cs-primary text-white py-2 rounded-xl text-xs font-bold transition-all">
-                  COPIAR PERGUNTAS BASE
-                </button>
-
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1">Link do Forms do Cliente</label>
-                <div className="flex gap-2">
-                  <input type="url" value={formsLink} onChange={e => setFormsLink(e.target.value)} placeholder="https://forms.google.com/..." className="flex-1 bg-cs-surface border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:border-cs-primary focus:outline-none" />
-                  <button onClick={handleSaveFormsLink} className="bg-cs-primary text-white px-4 rounded-xl text-xs font-bold hover:bg-cs-primary-hover transition-colors">Salvar</button>
-                </div>
-              </div>
-
-              <div className="bg-cs-bg border border-cs-border rounded-2xl p-6">
-                <h4 className="text-white font-bold mb-4 flex items-center gap-2 text-sm">
-                  <Bot size={16} className="text-cs-accent" /> 2. Análise de Respostas (IA)
-                </h4>
-                <p className="text-xs text-cs-text-secondary mb-4">Cole as respostas que o cliente deu no Forms para gerar o planejamento.</p>
-                
-                <textarea 
-                  value={pastedAnswers}
-                  onChange={e => setPastedAnswers(e.target.value)}
-                  placeholder="Cole aqui as respostas enviadas pelo cliente..."
-                  className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:border-cs-accent focus:outline-none resize-none mb-3 custom-scrollbar"
-                />
-                
-                <button 
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing}
-                  className="w-full bg-gradient-to-r from-cs-accent to-purple-600 hover:from-purple-600 hover:to-cs-accent text-white py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-cs-accent/20"
-                >
-                  {isAnalyzing ? <span className="animate-pulse">Analisando DNA da Marca...</span> : <><Sparkles size={14} /> GERAR PLANO ESTRATÉGICO</>}
-                </button>
-              </div>
-            </div>
-
-            {/* Direita: Plano Gerado */}
-            <div className="bg-cs-bg border border-cs-border rounded-2xl p-6 flex flex-col">
-              <h4 className="text-white font-bold mb-4 flex items-center gap-2 text-sm">
-                <Kanban size={16} className="text-green-400" /> 3. Plano de Ação Validado
-              </h4>
-              
-              <div className="flex-1 bg-cs-surface border border-cs-border rounded-xl p-4 overflow-y-auto custom-scrollbar">
-                {aiPlan ? (
-                  <div className="prose prose-invert prose-sm max-w-none">
-                    <pre className="whitespace-pre-wrap font-sans text-xs text-cs-text-primary bg-transparent p-0 m-0 border-0">{aiPlan}</pre>
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-cs-text-secondary opacity-50">
-                    <Target size={32} className="mb-2" />
-                    <p className="text-xs text-center">Aguardando análise da IA para<br/>gerar o plano de 30 dias.</p>
-                  </div>
-                )}
-              </div>
-              
-              {aiPlan && (
-                <button 
-                  onClick={handleApprove}
-                  disabled={isApproving}
-                  className="mt-4 w-full bg-green-500 hover:bg-green-600 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-green-500/20 disabled:opacity-50"
-                >
-                  {isApproving ? 'CONVERTENDO...' : 'APROVAR & CONVERTER EM TAREFAS'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Diretrizes de DNA da Marca (Editáveis com Persistência) */}
-      <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 shadow-xl space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="text-white font-bold text-base flex items-center gap-2">
-              <Sparkles size={18} className="text-cs-primary" /> Cérebro & DNA da Marca
-            </h4>
-            <p className="text-xs text-cs-text-secondary">Diretrizes estratégicas que guiam a produção, tom de voz e IA da conta.</p>
-          </div>
-          <button
-            onClick={() => {
-              if (isEditingDna) {
-                handleSaveDna();
-              } else {
-                setIsEditingDna(true);
-              }
-            }}
-            className="px-4 py-2 bg-cs-primary hover:bg-cs-primary/90 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-          >
-            {isEditingDna ? 'SALVAR DIRETRIZES' : 'EDITAR DIRETRIZES'}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
-            <h5 className="text-xs font-bold text-white flex items-center gap-2">
-              <Users size={16} className="text-blue-400" /> Público-Alvo
-            </h5>
-            {isEditingDna ? (
-              <textarea
-                value={dnaForm.target_audience}
-                onChange={e => setDnaForm(prev => ({ ...prev, target_audience: e.target.value }))}
-                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
-                placeholder="Descreva o público-alvo, dores e faixa etária..."
-              />
-            ) : (
-              <p className="text-xs text-cs-text-secondary leading-relaxed">
-                {client.target_audience || "Público-alvo não configurado. Clique em Editar para preencher."}
-              </p>
-            )}
-          </div>
-
-          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
-            <h5 className="text-xs font-bold text-white flex items-center gap-2">
-              <MessageSquare size={16} className="text-purple-400" /> Tom de Voz
-            </h5>
-            {isEditingDna ? (
-              <textarea
-                value={dnaForm.tone_of_voice}
-                onChange={e => setDnaForm(prev => ({ ...prev, tone_of_voice: e.target.value }))}
-                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
-                placeholder="Descreva o tom de voz, estilo de linguagem e postura..."
-              />
-            ) : (
-              <p className="text-xs text-cs-text-secondary leading-relaxed">
-                {client.tone_of_voice || "Tom de voz não configurado. Clique em Editar para preencher."}
-              </p>
-            )}
-          </div>
-
-          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
-            <h5 className="text-xs font-bold text-white flex items-center gap-2">
-              <Target size={16} className="text-green-400" /> Proposta de Valor
-            </h5>
-            {isEditingDna ? (
-              <textarea
-                value={dnaForm.value_proposition}
-                onChange={e => setDnaForm(prev => ({ ...prev, value_proposition: e.target.value }))}
-                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
-                placeholder="Qual o diferencial único que resolve a dor do cliente..."
-              />
-            ) : (
-              <p className="text-xs text-cs-text-secondary leading-relaxed">
-                {client.value_proposition || "Proposta de valor não configurada. Clique em Editar para preencher."}
-              </p>
-            )}
-          </div>
-
-          <div className="bg-cs-bg border border-cs-border rounded-2xl p-5 space-y-2">
-            <h5 className="text-xs font-bold text-white flex items-center gap-2">
-              <Rocket size={16} className="text-orange-400" /> Objetivos Estratégicos
-            </h5>
-            {isEditingDna ? (
-              <textarea
-                value={dnaForm.strategic_goals}
-                onChange={e => setDnaForm(prev => ({ ...prev, strategic_goals: e.target.value }))}
-                className="w-full h-24 bg-cs-surface border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none custom-scrollbar"
-                placeholder="Principais metas e KPIs estratégicos da conta..."
-              />
-            ) : (
-              <p className="text-xs text-cs-text-secondary leading-relaxed">
-                {client.strategic_goals || "Objetivos estratégicos não configurados. Clique em Editar para preencher."}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ProfitabilityTab({ client, tasks = [] }) {
   const { team } = useTeam();
 
-  // Filtrar tarefas apenas deste cliente (já pré-filtradas de forma otimizada pelo useTasks)
-  const clientTasks = tasks;
-  
-  // Calcular custo estimado e real
   let realTeamCost = 0;
   let estimatedBurnRate = 0;
-  clientTasks.forEach(task => {
+  let totalTrackedHours = 0;
+  let totalEstimatedHours = 0;
+
+  tasks.forEach(task => {
     const hoursTracked = (task.tracked_seconds || 0) / 3600;
-    const hoursEstimated = task.estimated_hours || 0;
-    
+    const hoursEstimated = Number(task.estimated_hours || 0);
     const assignee = team.find(m => m.id === task.assigned_to_id || m.name === task.assigned_to);
-    const hourlyCost = assignee?.hourly_cost || 50; 
-    
-    realTeamCost += (hoursTracked * hourlyCost);
-    estimatedBurnRate += (hoursEstimated * hourlyCost);
+    const hourlyCost = assignee?.hourly_cost || 50;
+
+    totalTrackedHours += hoursTracked;
+    totalEstimatedHours += hoursEstimated;
+    realTeamCost += hoursTracked * hourlyCost;
+    estimatedBurnRate += hoursEstimated * hourlyCost;
   });
 
   const revenue = Number(client.monthly_fee) || 0;
-  const overhead = (revenue * 0.15); // 15% custos fixos da agência (aluguel, software)
-  const profit = revenue - realTeamCost - overhead;
+  const profit = revenue - realTeamCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const isBurnRateHigh = revenue > 0 && estimatedBurnRate > revenue * 0.70;
 
-  const isBurnRateHigh = revenue > 0 && estimatedBurnRate > (revenue * 0.70);
-
-  // Cálculo de Status
-  let marginStatus = 'SAUDÁVEL';
-  let marginColor = 'text-green-400';
-  let marginBg = 'bg-green-500/10 border-green-500/20';
-  if (margin < 40 && margin > 15) {
-    marginStatus = 'ATENÇÃO';
-    marginColor = 'text-yellow-400';
-    marginBg = 'bg-yellow-500/10 border-yellow-500/20';
-  } else if (margin <= 15) {
-    marginStatus = 'CRÍTICO';
-    marginColor = 'text-red-400';
-    marginBg = 'bg-red-500/10 border-red-500/20';
+  let marginStatus = 'SEM RECEITA';
+  let marginColor = 'text-zinc-400';
+  let marginBg = 'bg-zinc-500/10 border-zinc-500/20';
+  if (revenue > 0) {
+    if (margin >= 40) {
+      marginStatus = 'SAUDÁVEL';
+      marginColor = 'text-green-400';
+      marginBg = 'bg-green-500/10 border-green-500/20';
+    } else if (margin > 15) {
+      marginStatus = 'ATENÇÃO';
+      marginColor = 'text-yellow-400';
+      marginBg = 'bg-yellow-500/10 border-yellow-500/20';
+    } else {
+      marginStatus = 'CRÍTICO';
+      marginColor = 'text-red-400';
+      marginBg = 'bg-red-500/10 border-red-500/20';
+    }
   }
 
-  const teamCostPercent = revenue > 0 ? (realTeamCost / revenue) * 100 : 0;
-  const overheadPercent = revenue > 0 ? (overhead / revenue) * 100 : 0;
-  const profitPercent = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const teamCostPercent = revenue > 0 ? Math.min(100, (realTeamCost / revenue) * 100) : 0;
+  const profitPercent = revenue > 0 ? Math.max(0, Math.min(100, (profit / revenue) * 100)) : 0;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8">
       {isBurnRateHigh && (
         <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-center gap-4">
           <AlertCircle size={24} className="text-red-400" />
           <div>
             <h4 className="text-red-400 font-bold">Aviso de Burn Rate Elevado</h4>
-            <p className="text-sm text-white/80">O custo estimado de produção (R$ {estimatedBurnRate.toLocaleString('pt-BR')}) para este contrato ultrapassa 70% da receita mensal. Revise os tempos estimados das tarefas.</p>
+            <p className="text-sm text-white/80">O custo estimado de produção (R$ {estimatedBurnRate.toLocaleString('pt-BR')}) ultrapassa 70% da receita mensal.</p>
           </div>
         </div>
       )}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Receita Mensal</p>
+          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Fee Mensal</p>
           <p className="text-xl font-bold text-white">R$ {revenue.toLocaleString('pt-BR')}</p>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Custo de Operação (Burn)</p>
+          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Custo Apontado</p>
           <p className="text-xl font-bold text-red-400">R$ {realTeamCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Lucro Líquido Real</p>
+          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Resultado Bruto</p>
           <p className="text-xl font-bold text-green-400">R$ {profit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
         <div className="bg-cs-surface border border-cs-border rounded-2xl p-5">
-          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Margem Real</p>
+          <p className="text-cs-text-secondary text-[10px] uppercase font-bold mb-1">Margem Apurada</p>
           <div className="flex items-center gap-2">
             <p className="text-xl font-bold text-white">{margin.toFixed(1)}%</p>
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${marginColor} ${marginBg}`}>{marginStatus}</span>
@@ -1309,76 +971,65 @@ function ProfitabilityTab({ client, tasks = [] }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-          <h4 className="text-white font-bold mb-6 flex items-center gap-2">
-            <TrendingIcon size={18} className="text-cs-primary" /> Decomposição de Custos
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 space-y-4">
+          <h4 className="text-white font-bold flex items-center gap-2">
+            <TrendingIcon size={18} className="text-cs-primary" /> Decomposição Real
           </h4>
-          <div className="space-y-4">
-            {[
-              { label: 'Equipe (Horas Gastas)', val: realTeamCost, color: 'bg-cs-primary', p: teamCostPercent },
-              { label: 'Custos Fixos / Ferramentas', val: overhead, color: 'bg-purple-500', p: overheadPercent },
-              { label: 'Lucro Líquido', val: profit, color: 'bg-green-500', p: profitPercent },
-            ].map((item, i) => (
-              <div key={i}>
-                <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-cs-text-secondary">{item.label}</span>
-                  <span className="text-white font-medium">R$ {item.val.toLocaleString('pt-BR')} ({item.p}%)</span>
-                </div>
-                <div className="w-full h-2 bg-cs-bg rounded-full overflow-hidden">
-                  <div className={cn("h-full transition-all duration-1000", item.color)} style={{ width: `${item.p}%` }}></div>
-                </div>
+          {[
+            { label: 'Horas Apontadas (Cronômetro)', val: realTeamCost, color: 'bg-cs-primary', p: teamCostPercent },
+            { label: 'Saldo sobre Fee', val: Math.max(0, profit), color: 'bg-green-500', p: profitPercent },
+          ].map((item, i) => (
+            <div key={i}>
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="text-cs-text-secondary">{item.label}</span>
+                <span className="text-white font-medium">R$ {item.val.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ({item.p.toFixed(1)}%)</span>
               </div>
-            ))}
-          </div>
+              <div className="w-full h-2 bg-cs-bg rounded-full overflow-hidden">
+                <div className={cn('h-full transition-all duration-500', item.color)} style={{ width: `${item.p}%` }} />
+              </div>
+            </div>
+          ))}
         </div>
 
-        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6">
-          <h4 className="text-white font-bold mb-4 flex items-center gap-2">
-            <AlertTriangle size={18} className="text-yellow-400" /> Alertas de Eficiência
+        <div className="bg-cs-surface border border-cs-border rounded-2xl p-6 space-y-3">
+          <h4 className="text-white font-bold flex items-center gap-2">
+            <Clock size={18} className="text-cs-primary" /> Diagnóstico de Horas Reais
           </h4>
-          <div className="space-y-3">
-            <div className="p-3 bg-cs-bg border border-cs-border rounded-xl">
-<p className="text-xs text-white font-medium">Ociosidade Detectada</p>
-              <p className="text-[10px] text-cs-text-secondary mt-1">Este cliente consumiu menos 15% das horas planejadas este mês. Margem subiu.</p>
-            </div>
-            <div className="p-3 bg-cs-bg border border-cs-border rounded-xl">
-              <p className="text-xs text-white font-medium">Equilíbrio de Fee</p>
-              <p className="text-[10px] text-cs-text-secondary mt-1">O valor do fee está alinhado com o mercado para o volume atual de jobs.</p>
-            </div>
-          </div>
+          <p className="text-xs text-cs-text-secondary">
+            Horas contratadas no mês: <strong className="text-white">{client.monthly_hours_contracted || 10}h</strong> ·
+            Horas estimadas em tarefas: <strong className="text-white">{totalEstimatedHours.toFixed(1)}h</strong> ·
+            Horas cronometradas: <strong className="text-white">{totalTrackedHours.toFixed(1)}h</strong>
+          </p>
+          {totalTrackedHours === 0 && (
+            <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+              Nenhuma hora foi cronometrada ainda nas tarefas deste cliente. A margem acima reflete apenas o fee cadastrado sem apontamento de tempo.
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ATENÇÃO: isto NÃO é criptografia. É ofuscação reversível (base64 + string
-// invertida, sem chave). Qualquer pessoa com acesso à linha no banco decodifica
-// em uma linha de código. Serve apenas para não deixar a senha em texto puro
-// visível "a olho nu" em um dump — não protege contra vazamento de dados real.
-// Para proteger de verdade as credenciais dos clientes no client_vault, isso
-// precisa migrar para criptografia do lado do servidor (ex: extensão pgsodium
-// do Supabase, ou uma Edge Function que criptografa/descriptografa usando uma
-// chave que nunca chega ao frontend). Enquanto isso não acontece, trate este
-// vault como texto praticamente plano protegido só pela RLS da tabela.
-function encryptSecret(str) {
+// Ofuscação simples apenas para evitar texto puro em listagem; sem criptografia server-side.
+function encodeNote(str) {
   if (!str) return '';
   return 'ENC:' + btoa(encodeURIComponent(str).split('').reverse().join(''));
 }
 
-function decryptSecret(str) {
+function decodeNote(str) {
   if (!str) return '';
   if (!str.startsWith('ENC:')) return str;
   try {
     const raw = str.slice(4);
     const rev = atob(raw).split('').reverse().join('');
     return decodeURIComponent(rev);
-  } catch (e) {
+  } catch {
     return str;
   }
 }
 
-function VaultTab({ client, isPortal }) {
+function VaultTab({ client }) {
   const [vaultItems, setVaultItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPassword, setShowPassword] = useState({});
@@ -1387,10 +1038,7 @@ function VaultTab({ client, isPortal }) {
   useEffect(() => {
     async function fetchVault() {
       if (!isSupabaseConfigured) {
-        const safeName = (client?.name || 'cliente').toLowerCase().replace(/\s+/g, '');
-        setVaultItems([
-          { id: '1', platform_name: 'Instagram', encrypted_username: '@' + safeName, encrypted_password: encryptSecret('SenhaSegura123!'), notes: 'Login via App' }
-        ]);
+        setVaultItems([]);
         setLoading(false);
         return;
       }
@@ -1407,11 +1055,11 @@ function VaultTab({ client, isPortal }) {
   }, [client.id]);
 
   const handleSave = async () => {
-    if (!newItem.platform_name) return;
+    if (!newItem.platform_name.trim()) return;
     try {
       const itemToSave = {
         ...newItem,
-        encrypted_password: encryptSecret(newItem.encrypted_password)
+        encrypted_password: encodeNote(newItem.encrypted_password)
       };
 
       if (isSupabaseConfigured) {
@@ -1422,21 +1070,21 @@ function VaultTab({ client, isPortal }) {
         setVaultItems(prev => [...prev, { ...itemToSave, id: `vault-${Date.now()}` }]);
       }
       setNewItem({ platform_name: '', encrypted_username: '', encrypted_password: '', notes: '' });
-      toast.success('Credencial criptografada e salva no cofre!');
-    } catch (err) {
-      toast.error('Erro ao salvar no cofre');
+      toast.success('Registro salvo.');
+    } catch {
+      toast.error('Erro ao salvar registro de acesso.');
     }
   };
 
   const togglePassword = (id) => setShowPassword(prev => ({ ...prev, [id]: !prev[id] }));
 
   const handleDelete = async (id) => {
-    if (!confirm('Tem certeza que deseja remover esta credencial?')) return;
+    if (!confirm('Tem certeza que deseja remover este registro?')) return;
     setVaultItems(prev => prev.filter(item => item.id !== id));
     if (isSupabaseConfigured) {
       await supabase.from('client_vault').delete().eq('id', id);
     }
-    toast.success('Credencial removida do cofre');
+    toast.success('Registro removido.');
   };
 
   const copyToClipboard = (text, label) => {
@@ -1445,20 +1093,28 @@ function VaultTab({ client, isPortal }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-xs text-amber-200 flex items-start gap-3">
+        <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <strong className="block text-white mb-0.5">Aviso de Segurança sobre Acessos</strong>
+          Esta tabela é protegida apenas por RLS do Supabase, sem criptografia de ponta a ponta ou cofres dedicados. Armazene aqui preferencialmente referências de acesso (ex: ID da conta de anúncios, e-mail de login, onde está a senha no seu gerenciador) em vez de senhas críticas em claro.
+        </div>
+      </div>
+
       <div className="bg-cs-surface border border-cs-border rounded-3xl p-8 shadow-2xl">
         <div className="flex items-center gap-4 mb-6">
           <div className="w-12 h-12 bg-cs-primary rounded-xl flex items-center justify-center shadow-lg shadow-cs-primary/20">
-            <Lock size={24} className="text-white" />
+            <Lock size={24} className="text-black" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white tracking-tight">Cofre Seguro</h3>
-            <p className="text-cs-text-secondary text-sm">Credenciais e chaves de acesso criptografadas.</p>
+            <h3 className="text-xl font-bold text-white tracking-tight">Referências de Acesso</h3>
+            <p className="text-cs-text-secondary text-sm">Contas de anúncios, perfis e orientações de login desta conta.</p>
           </div>
         </div>
 
         {loading ? (
-          <p className="text-cs-text-secondary text-center py-8">Carregando cofre...</p>
+          <p className="text-cs-text-secondary text-center py-8">Carregando registros...</p>
         ) : (
           <div className="space-y-4">
             {vaultItems.map(item => (
@@ -1471,31 +1127,31 @@ function VaultTab({ client, isPortal }) {
                   <div className="flex items-center gap-2 bg-cs-surface px-3 py-2 rounded-lg border border-cs-border">
                     <span className="text-[10px] text-cs-text-secondary w-12">Login:</span>
                     <span className="text-sm text-white font-mono break-all flex-1">{item.encrypted_username}</span>
-                    <button onClick={() => copyToClipboard(item.encrypted_username, 'Login')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1" title="Copiar login">
+                    <button type="button" onClick={() => copyToClipboard(item.encrypted_username, 'Login')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1 cursor-pointer">
                       <Copy size={14} />
                     </button>
                   </div>
                   <div className="flex items-center gap-2 bg-cs-surface px-3 py-2 rounded-lg border border-cs-border relative">
-                    <span className="text-[10px] text-cs-text-secondary w-12">Senha:</span>
-                    <span className="text-sm text-white font-mono flex-1 break-all">{showPassword[item.id] ? decryptSecret(item.encrypted_password) : '••••••••••••'}</span>
-                    <button onClick={() => copyToClipboard(decryptSecret(item.encrypted_password), 'Senha')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1" title="Copiar senha">
+                    <span className="text-[10px] text-cs-text-secondary w-12">Nota:</span>
+                    <span className="text-sm text-white font-mono flex-1 break-all">{showPassword[item.id] ? decodeNote(item.encrypted_password) : '••••••••••••'}</span>
+                    <button type="button" onClick={() => copyToClipboard(decodeNote(item.encrypted_password), 'Nota')} className="text-cs-text-secondary hover:text-cs-primary transition-colors p-1 cursor-pointer">
                       <Copy size={14} />
                     </button>
-                    <button onClick={() => togglePassword(item.id)} className="text-cs-text-secondary hover:text-white transition-colors p-1">
+                    <button type="button" onClick={() => togglePassword(item.id)} className="text-cs-text-secondary hover:text-white transition-colors p-1 cursor-pointer">
                       {showPassword[item.id] ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
-                <button onClick={() => handleDelete(item.id)} className="opacity-0 group-hover:opacity-100 transition-opacity p-2 text-cs-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg" title="Remover credencial">
+                <button type="button" onClick={() => handleDelete(item.id)} className="opacity-70 group-hover:opacity-100 transition-opacity p-2 text-cs-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer">
                   <Trash2 size={16} />
                 </button>
               </div>
             ))}
-            
+
             {vaultItems.length === 0 && (
               <div className="text-center py-12 border-2 border-dashed border-cs-border rounded-2xl bg-cs-surface/20">
                 <Lock size={32} className="mx-auto text-cs-text-secondary mb-4 opacity-50" />
-                <p className="text-cs-text-secondary font-medium">Nenhuma credencial cadastrada.</p>
+                <p className="text-cs-text-secondary font-medium">Nenhum acesso registrado para esta conta.</p>
               </div>
             )}
           </div>
@@ -1503,50 +1159,50 @@ function VaultTab({ client, isPortal }) {
       </div>
 
       <div className="bg-cs-surface border border-cs-border rounded-3xl p-8 shadow-2xl">
-        <h4 className="text-lg font-bold text-white mb-6">Adicionar Credencial</h4>
+        <h4 className="text-lg font-bold text-white mb-6">Adicionar Referência de Acesso</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Plataforma *</label>
-            <input 
-              type="text" 
-              placeholder="Ex: Instagram, Google Ads" 
+            <input
+              type="text"
+              placeholder="Ex: Meta Business Manager, Google Ads"
               value={newItem.platform_name}
-              onChange={e => setNewItem({...newItem, platform_name: e.target.value})}
-              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none transition-colors"
+              onChange={e => setNewItem({ ...newItem, platform_name: e.target.value })}
+              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none"
             />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Login / Email</label>
-            <input 
-              type="text" 
+            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">ID / Login / E-mail</label>
+            <input
+              type="text"
               value={newItem.encrypted_username}
-              onChange={e => setNewItem({...newItem, encrypted_username: e.target.value})}
-              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none font-mono transition-colors"
+              onChange={e => setNewItem({ ...newItem, encrypted_username: e.target.value })}
+              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none font-mono"
             />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Senha</label>
-            <input 
-              type="password" 
+            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Referência / Chave</label>
+            <input
+              type="password"
               value={newItem.encrypted_password}
-              onChange={e => setNewItem({...newItem, encrypted_password: e.target.value})}
-              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none font-mono transition-colors"
+              onChange={e => setNewItem({ ...newItem, encrypted_password: e.target.value })}
+              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none font-mono"
             />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Observações (Opcional)</label>
-            <input 
-              type="text" 
-              placeholder="Ex: Autenticação em 2 fatores no celular" 
+            <label className="text-[10px] font-bold text-cs-text-secondary uppercase tracking-widest mb-2 block">Observações</label>
+            <input
+              type="text"
+              placeholder="Ex: Acesso via 1Password / 2FA no celular do cliente"
               value={newItem.notes}
-              onChange={e => setNewItem({...newItem, notes: e.target.value})}
-              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none transition-colors"
+              onChange={e => setNewItem({ ...newItem, notes: e.target.value })}
+              className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white focus:border-cs-primary outline-none"
             />
           </div>
         </div>
         <div className="flex justify-end mt-6">
-          <button onClick={handleSave} className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-cs-primary/30 transition-all active:scale-95">
-            SALVAR NO COFRE
+          <button type="button" onClick={handleSave} className="bg-cs-primary hover:bg-cs-primary-hover text-black px-6 py-3 rounded-xl font-extrabold text-sm shadow-lg shadow-cs-primary/30 transition-all cursor-pointer">
+            SALVAR REGISTRO
           </button>
         </div>
       </div>

@@ -15,24 +15,48 @@ export function useNotifications(enabled = true) {
     const safeTasks = Array.isArray(tasks) ? tasks : [];
     const safeDeals = Array.isArray(deals) ? deals : [];
 
-    // 1. Tasks with deadlines in the next 24h
     safeTasks.forEach(t => {
       if (t.status === 'concluido' || !t.deadline) return;
       try {
         const d = endOfDay(parseISO(t.deadline));
         if (isNaN(d.getTime())) return;
         if (d < now) {
-          alerts.push({ id: `overdue-${t.id}`, type: 'danger', title: 'Prazo vencido', message: `"${t.title}" está atrasada`, icon: '🔴' });
+          alerts.push({
+            id: `overdue-${t.id}`,
+            type: 'danger',
+            title: 'Prazo vencido',
+            message: `"${t.title}" está atrasada`,
+            icon: '🔴',
+            targetView: 'producao',
+            clientId: t.client_id || null,
+          });
         } else if (d <= addDays(now, 1)) {
-          alerts.push({ id: `deadline-${t.id}`, type: 'warning', title: 'Prazo próximo', message: `"${t.title}" vence em menos de 24h`, icon: '🟡' });
+          alerts.push({
+            id: `deadline-${t.id}`,
+            type: 'warning',
+            title: 'Prazo próximo',
+            message: `"${t.title}" vence em menos de 24h`,
+            icon: '🟡',
+            targetView: 'producao',
+            clientId: t.client_id || null,
+          });
         }
-      } catch {}
+      } catch {
+        // Ignora data inválida
+      }
     });
 
-    // 2. Tasks awaiting client approval for 3+ days  
     safeTasks.forEach(t => {
       if (t.status === 'aprovacao-cliente' || t.status === 'aguardando-cliente') {
-        alerts.push({ id: `approval-${t.id}`, type: 'info', title: 'Aguardando cliente', message: `"${t.title}" aguarda aprovação`, icon: '🟠' });
+        alerts.push({
+          id: `approval-${t.id}`,
+          type: 'info',
+          title: 'Aguardando cliente',
+          message: `"${t.title}" aguarda aprovação`,
+          icon: '🟠',
+          targetView: 'producao',
+          clientId: t.client_id || null,
+        });
       }
     });
 
@@ -46,6 +70,8 @@ export function useNotifications(enabled = true) {
         title: 'Retorno comercial',
         message: `${deal.company} · ${deal.next_action || 'Retomar contato'}`,
         icon: '💼',
+        targetView: 'crm',
+        clientId: deal.client_id || null,
       });
     });
 

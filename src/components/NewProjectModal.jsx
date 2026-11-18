@@ -419,7 +419,7 @@ export default function NewProjectModal({ onClose, onSave, clients = [], allowPr
             </div>
             <div>
               <h2 className="text-base font-bold text-white">Novo Projeto</h2>
-              <p className="text-xs text-cs-text-secondary">{STEPS[step].label} — Passo {step + 1} de {STEPS.length}</p>
+              <p className="text-xs text-cs-text-secondary">{STEPS[step].label}: Passo {step + 1} de {STEPS.length}</p>
             </div>
           </div>
           <button onClick={onClose} className="text-cs-text-secondary hover:text-white p-1"><X size={20} /></button>

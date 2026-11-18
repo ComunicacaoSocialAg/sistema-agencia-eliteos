@@ -45,6 +45,7 @@ import RegistrationLinkModal from '../components/RegistrationLinkModal';
 import ClientRegistrationDetailsModal from '../components/ClientRegistrationDetailsModal';
 import { useAllDeliverables } from '../hooks/useDeliverables';
 import { createClientFolderStructure, createProjectFolder, createProposalFolder } from '../lib/googleDrive';
+import { BRAND_DEFAULTS, buildClientBrandPayload, normalizeHexColor } from '../lib/brandKit';
 
 const STATUS_COLORS = {
   active: 'bg-green-500/10 text-green-400 border-green-500/20',
@@ -222,14 +223,24 @@ function NewClientModal({ onClose, onSave }) {
     contact_email: '',
     contact_phone: '',
     monthly_fee: '',
+    monthly_hours_contracted: '10',
     billing_day: '10',
     contract_start_date: '',
-    brand_color: '#3b82f6',
+    primary_color: BRAND_DEFAULTS.primary_color,
+    secondary_color: BRAND_DEFAULTS.secondary_color,
+    accent_color: BRAND_DEFAULTS.accent_color,
+    typography: BRAND_DEFAULTS.typography,
+    logo_url: '',
+    keywordsText: '',
     drive_url: '',
+    website: '',
+    instagram: '',
     reportei_url: '',
     tone_of_voice: '',
     target_audience: '',
+    value_proposition: '',
     strategic_goals: '',
+    ai_instructions: '',
     notes: ''
   });
 
@@ -332,23 +343,60 @@ function NewClientModal({ onClose, onSave }) {
                 <input type="url" value={form.drive_url} onChange={e => set('drive_url', e.target.value)} placeholder="https://drive.google.com/drive/folders/..."
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
               </div>
-              <div>
-                <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Link do Relatório (Reportei / Dashboard Externa)</label>
-                <input type="url" value={form.reportei_url} onChange={e => set('reportei_url', e.target.value)} placeholder="https://app.reportei.com/report/..."
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Instagram (@)</label>
+                  <input type="text" value={form.instagram} onChange={e => set('instagram', e.target.value)} placeholder="@empresa"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Website</label>
+                  <input type="url" value={form.website} onChange={e => set('website', e.target.value)} placeholder="https://empresa.com.br"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+                </div>
               </div>
               <div>
-                <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Cor da Marca (HEX)</label>
-                <div className="flex items-center gap-3">
-                  <input type="color" value={form.brand_color} onChange={e => set('brand_color', e.target.value)} className="w-10 h-10 rounded-xl bg-cs-bg border border-cs-border cursor-pointer" />
-                  <input type="text" value={form.brand_color} onChange={e => set('brand_color', e.target.value)} className="flex-1 bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white font-mono text-sm uppercase" />
-                </div>
+                <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Link / ID do Relatório (Reportei)</label>
+                <input type="text" value={form.reportei_url} onChange={e => set('reportei_url', e.target.value)} placeholder="https://app.reportei.com/report/..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
               </div>
             </div>
           )}
 
           {activeTab === 'branding' && (
             <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { key: 'primary_color', label: 'Cor Primária' },
+                  { key: 'secondary_color', label: 'Cor Secundária' },
+                  { key: 'accent_color', label: 'Cor de Destaque' },
+                ].map(item => (
+                  <div key={item.key} className="bg-cs-bg border border-cs-border rounded-xl p-3 space-y-2">
+                    <label className="text-[10px] font-bold text-cs-text-secondary uppercase block">{item.label}</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={normalizeHexColor(form[item.key], '#3b82f6')} onChange={e => set(item.key, e.target.value)} className="w-9 h-9 rounded-lg bg-transparent border border-cs-border cursor-pointer shrink-0" />
+                      <input type="text" value={form[item.key]} onChange={e => set(item.key, e.target.value)} className="w-full bg-cs-surface border border-cs-border rounded-lg px-2.5 py-1.5 text-white font-mono text-xs uppercase" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Tipografia Oficial</label>
+                  <input type="text" value={form.typography} onChange={e => set('typography', e.target.value)} placeholder="Ex: Montserrat + Inter"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">URL do Logotipo</label>
+                  <input type="url" value={form.logo_url} onChange={e => set('logo_url', e.target.value)} placeholder="https://..."
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Palavras-Chave de Marca (vírgula)</label>
+                <input type="text" value={form.keywordsText} onChange={e => set('keywordsText', e.target.value)} placeholder="Ex: Autoridade, Medicina Vascular, Poços de Caldas"
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary" />
+              </div>
               <div>
                 <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Tom de Voz da Comunicação</label>
                 <input type="text" value={form.tone_of_voice} onChange={e => set('tone_of_voice', e.target.value)} placeholder="Ex: Sofisticado, rústico-chique e próximo."
@@ -361,7 +409,12 @@ function NewClientModal({ onClose, onSave }) {
               </div>
               <div>
                 <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Objetivo Estratégico do Cliente</label>
-                <textarea rows={2} value={form.strategic_goals} onChange={e => set('strategic_goals', e.target.value)} placeholder="Ex: Ser a maior referência da região em gastronomia artesanal..."
+                <textarea rows={2} value={form.strategic_goals} onChange={e => set('strategic_goals', e.target.value)} placeholder="Ex: Ser referência regional em..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary custom-scrollbar" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-cs-text-secondary uppercase tracking-widest mb-1.5 block">Regras de Compliance / IA</label>
+                <textarea rows={2} value={form.ai_instructions} onChange={e => set('ai_instructions', e.target.value)} placeholder="Ex: Seguir resolução CFM/CFO, palavras proibidas..."
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-cs-primary custom-scrollbar" />
               </div>
             </div>
@@ -370,19 +423,40 @@ function NewClientModal({ onClose, onSave }) {
 
         {/* Modal Footer */}
         <div className="p-6 border-t border-cs-border bg-cs-bg/50 flex items-center justify-between shrink-0">
-          <button type="button" onClick={onClose} className="px-5 py-2.5 text-xs font-bold text-cs-text-secondary hover:text-white uppercase tracking-wider">Cancelar</button>
+          <button type="button" onClick={onClose} className="px-5 py-2.5 text-xs font-bold text-cs-text-secondary hover:text-white uppercase tracking-wider cursor-pointer">Cancelar</button>
           <button 
             disabled={saving}
             onClick={async () => {
-              if (!form.name.trim()) return;
+              if (!form.name.trim()) {
+                toast.error('Informe o nome da empresa ou marca.');
+                return;
+              }
               if (saving) return;
               setSaving(true);
-              try { if (await onSave(form)) onClose(); }
-              finally { setSaving(false); }
+              try {
+                const payload = buildClientBrandPayload({}, { ...form, keywords: form.keywordsText });
+                if (await onSave({
+                  ...payload,
+                  name: form.name.trim(),
+                  document_id: form.document_id.trim(),
+                  contact_name: form.contact_name.trim(),
+                  contact_email: form.contact_email.trim(),
+                  contact_phone: form.contact_phone.trim(),
+                  monthly_fee: Number(form.monthly_fee) || 0,
+                  monthly_hours_contracted: Number(form.monthly_hours_contracted) || 10,
+                  billing_day: form.billing_day,
+                  contract_start_date: form.contract_start_date,
+                  reportei_url: form.reportei_url,
+                  target_audience: form.target_audience,
+                  value_proposition: form.value_proposition,
+                  strategic_goals: form.strategic_goals,
+                  notes: form.notes,
+                })) onClose();
+              } finally { setSaving(false); }
             }}
-            className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-xl shadow-cs-primary/20 cursor-pointer"
+            className="bg-cs-primary hover:bg-cs-primary-hover text-black px-6 py-3 rounded-xl font-extrabold text-xs uppercase tracking-widest transition-all shadow-xl shadow-cs-primary/20 cursor-pointer"
           >
-            Salvar e Cadastrar Cliente
+            {saving ? 'Salvando...' : 'Salvar e Cadastrar Cliente'}
           </button>
         </div>
       </div>
@@ -390,7 +464,7 @@ function NewClientModal({ onClose, onSave }) {
   );
 }
 
-export default function ClientsView() {
+export default function ClientsView({ initialClientId = null, initialClientTab = 'overview', onClearDeepLink }) {
   const { role, isDemoMode } = useAuth();
   const { clients, loading: clientsLoading, error: clientsError, refetch: refreshClients, totalMRR, createClient, updateClient } = useClients();
   const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects, remote: remoteProjects, createProject, updateProject, deleteProject } = useProjects();
@@ -407,14 +481,22 @@ export default function ClientsView() {
   
   const [showNewClientModal, setShowNewClientModal] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [selectedClientId, setSelectedClientId] = useState(null);
+  const [selectedClientId, setSelectedClientId] = useState(initialClientId || null);
   const selectedClient = selectedClientId 
     ? (clients.find(c => areIdsMatching(c.id, selectedClientId, c.name, '')) || clients.find(c => c.id === selectedClientId) || null)
     : null;
   const setSelectedClient = (client) => {
     setSelectedClientId(client ? client.id : null);
+    if (!client && onClearDeepLink) onClearDeepLink();
   };
-  const [clientInitialTab, setClientInitialTab] = useState('overview');
+  const [clientInitialTab, setClientInitialTab] = useState(initialClientTab || 'overview');
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(initialClientId);
+      setClientInitialTab(initialClientTab || 'overview');
+    }
+  }, [initialClientId, initialClientTab]);
 
   const pendingDeliverables = (deliverables || []).filter(d => d.status === 'pendente');
 
@@ -471,25 +553,74 @@ export default function ClientsView() {
     );
   });
 
-  const handleConvertRegistrationToClient = async (reg) => {
-    const clientPayload = {
-      id: reg.id,
-      name: reg.trade_name || reg.company_name,
-      document_id: reg.document_number,
-      contact_name: reg.representative_name,
-      contact_email: reg.contact_email,
-      contact_phone: reg.contact_phone,
-      monthly_fee: 0,
-      monthly_hours_contracted: 10,
-      billing_day: reg.billing_day || '10',
-      status: 'active',
-      lifecycle_stage: 'onboarding',
-      notes: reg.observations || '',
-      reportei_config: {
-        instagram_handle: reg.instagram_handle || ''
-      }
+  const handleConvertRegistrationToClient = async (reg, options = {}) => {
+    const raw = reg.raw_data || {};
+    const targetName = reg.trade_name || reg.company_name;
+    const existing = clients.find(c =>
+      (raw.client_id && areIdsMatching(c.id, raw.client_id, c.name, targetName)) ||
+      (reg.document_number && c.document_id && c.document_id.replace(/\D/g, '') === reg.document_number.replace(/\D/g, '')) ||
+      (c.name && targetName && c.name.trim().toLowerCase() === targetName.trim().toLowerCase())
+    );
+
+    const fee = options.monthly_fee !== undefined && options.monthly_fee !== ''
+      ? Number(options.monthly_fee)
+      : Number(raw.deal_value || existing?.monthly_fee || 0);
+
+    const brandPayload = buildClientBrandPayload(existing || {}, {
+      primary_color: options.primary_color || raw.primary_color || existing?.primary_color || existing?.brand_color,
+      secondary_color: options.secondary_color || raw.secondary_color || existing?.secondary_color,
+      accent_color: options.accent_color || raw.accent_color || existing?.accent_color,
+      typography: options.typography || raw.typography || existing?.typography,
+      logo_url: options.logo_url || raw.logo_url || existing?.logo_url,
+      drive_url: options.drive_url || raw.drive_url || existing?.drive_url,
+      website: reg.website_url || existing?.website,
+      instagram: reg.instagram_handle || existing?.instagram,
+      tone_of_voice: raw.tone_of_voice || existing?.tone_of_voice,
+    });
+
+    const address = {
+      cep: reg.cep || '',
+      street: reg.street || '',
+      number: reg.number || '',
+      complement: reg.complement || '',
+      neighborhood: reg.neighborhood || '',
+      city: reg.city || '',
+      state: reg.state || '',
     };
-    return createClient(clientPayload, { handoff: true });
+
+    const clientPayload = {
+      ...brandPayload,
+      id: existing?.id || reg.id,
+      name: existing?.name || targetName,
+      document_id: reg.document_number || existing?.document_id || '',
+      contact_name: reg.representative_name || existing?.contact_name || '',
+      contact_email: reg.contact_email || existing?.contact_email || '',
+      contact_phone: reg.contact_phone || existing?.contact_phone || '',
+      monthly_fee: fee,
+      monthly_hours_contracted: existing?.monthly_hours_contracted || 10,
+      billing_day: reg.billing_day || existing?.billing_day || '10',
+      status: 'active',
+      lifecycle_stage: existing?.lifecycle_stage || 'onboarding',
+      target_audience: raw.target_audience || existing?.target_audience || '',
+      notes: reg.observations || existing?.notes || '',
+      registration_id: reg.id,
+      deal_id: raw.deal_id || existing?.deal_id || null,
+      address,
+      reportei_config: {
+        ...(existing?.reportei_config || {}),
+        instagram_handle: reg.instagram_handle || existing?.reportei_config?.instagram_handle || '',
+      },
+    };
+
+    const savedClient = existing
+      ? await updateClient(clientPayload)
+      : await createClient(clientPayload, { handoff: true });
+
+    if (savedClient && options.openOnboarding) {
+      setSelectedClient(savedClient);
+      setClientInitialTab('onboarding');
+    }
+    return savedClient;
   };
 
   const handleInjectTestData = async () => {
@@ -499,7 +630,8 @@ export default function ClientsView() {
         contact_name: 'Alberto',
         contact_email: 'contato@dralbertobrasil.com',
         monthly_fee: 5000,
-        brand_color: '#0ea5e9',
+        brand_color: '#0284c7',
+        primary_color: '#0284c7',
         notes: 'Clínica médica. Foco em autoridade e captação de pacientes particulares.',
         tone_of_voice: 'Profissional, acolhedor e científico.',
         target_audience: 'Pacientes 30-60 anos buscando atendimento humanizado.',
@@ -511,17 +643,18 @@ export default function ClientsView() {
         contact_name: 'Carlos Dubola',
         contact_email: 'carlos@dubola.com.br',
         monthly_fee: 3500,
-        brand_color: '#ef4444',
+        brand_color: '#eab308',
+        primary_color: '#eab308',
         notes: 'Marca de molhos de pimenta e condimentos artesanais.',
         tone_of_voice: 'Jovem, divertido, ousado e apetitoso.',
         target_audience: 'Jovens adultos que gostam de churrasco, hambúrguer e pimentas.',
         strategic_goals: 'Expandir a marca para empórios premium e e-commerce.'
       });
 
-      alert('Dados de teste injetados com sucesso!');
+      toast.success('Dados de teste criados.');
     } catch (err) {
       console.error('Erro ao injetar dados:', err);
-      alert('Erro ao injetar dados. Verifique o console.');
+      toast.error('Erro ao injetar dados.');
     }
   };
 
@@ -761,7 +894,9 @@ export default function ClientsView() {
               <div className="text-3xl font-black text-white">
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(totalMRR)}
               </div>
-              <div className="text-[10px] text-green-400 mt-1 font-bold">▲ 12.5% vs mês anterior</div>
+              <div className="text-[10px] text-cs-text-secondary mt-1 font-bold">
+                {clients.filter(c => c.status === 'active').length} contrato(s) ativo(s)
+              </div>
             </div>
           </div>
         )}
@@ -1114,9 +1249,9 @@ export default function ClientsView() {
                               <span className="text-xs text-white font-bold">{pct}%</span>
                             </div>
                           </td>
-                          <td className="p-4">{proj.end_date ? new Date(proj.end_date).toLocaleDateString('pt-BR') : '—'}</td>
+                          <td className="p-4">{proj.end_date ? new Date(proj.end_date).toLocaleDateString('pt-BR') : '-'}</td>
                           <td className="p-4 text-right font-bold text-white">
-                            {proj.value > 0 ? `R$ ${proj.value.toLocaleString()}` : '—'}
+                            {proj.value > 0 ? `R$ ${proj.value.toLocaleString()}` : '-'}
                           </td>
                           <td className="p-4 text-center">
                             <button 

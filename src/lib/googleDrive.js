@@ -95,13 +95,8 @@ export async function openGooglePicker() {
 // Cria uma pasta no Google Drive com nome e retorna o ID e URL
 export async function createDriveFolder(folderName, parentFolderId = null) {
   if (!isGoogleConfigured) {
-    console.warn('[Drive] Google não configurado.');
-    // Retorna link simulado no modo demo
-    return {
-      id: `demo-folder-${Date.now()}`,
-      url: `https://drive.google.com/drive/folders/demo-${encodeURIComponent(folderName)}`,
-      name: folderName,
-    };
+    console.warn('[Drive] Google Drive não configurado. Informe o link da pasta manualmente.');
+    return null;
   }
 
   const token = await getAccessToken();
@@ -160,6 +155,6 @@ export async function createProjectFolder(projectName, clientFolderId = null) {
 
 // Cria pasta para uma proposta
 export async function createProposalFolder(proposalName, clientFolderId = null) {
-  const folder = await createDriveFolder(`💼 Proposta — ${proposalName}`, clientFolderId);
+  const folder = await createDriveFolder(`Proposta: ${proposalName}`, clientFolderId);
   return folder;
 }

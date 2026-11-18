@@ -22,8 +22,8 @@ const STATUS_CONFIG = {
 };
 
 export default function BuzzMonitorView() {
-  const { selectedClient, isAllClients, selectedClientId, setSelectedClientId, clients } = useActiveClient();
-  const { posts, loading, error, refreshData, createPost, prepareApproval, updatePostStatus, deletePost, saveMonthlyMetric, metrics } = useSocialManagement();
+  const { selectedClient, isAllClients, clients } = useActiveClient();
+  const { posts, loading, error, refreshData, createPost, updatePost, prepareApproval, updatePostStatus, deletePost, saveMonthlyMetric, metrics } = useSocialManagement();
 
   const { deliverables } = useAllDeliverables();
   const [approvalTask, setApprovalTask] = useState(null);
@@ -43,11 +43,11 @@ export default function BuzzMonitorView() {
   const [activeTab, setActiveTab] = useState('grade'); // 'grade' | 'canais' | 'fechamento'
   const [statusFilter, setStatusFilter] = useState('todos');
   const [showNewModal, setShowNewModal] = useState(false);
+  const [editingPostId, setEditingPostId] = useState(null);
   const [showMetricModal, setShowMetricModal] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
-  // Form de novo post
-  const [newPost, setNewPost] = useState({
+  const emptyPostForm = () => ({
     title: '',
     client_id: selectedClient?.id || clients[0]?.id || '',
     channel: 'Instagram',
@@ -57,8 +57,34 @@ export default function BuzzMonitorView() {
     caption: '',
     visual_concept: '',
     post_url: '',
-    medical_compliance_checked: false
+    medical_compliance_checked: false,
   });
+
+  // Form de novo post / edição
+  const [newPost, setNewPost] = useState(emptyPostForm);
+
+  const openNewPostModal = () => {
+    setEditingPostId(null);
+    setNewPost(emptyPostForm());
+    setShowNewModal(true);
+  };
+
+  const openEditPostModal = (post) => {
+    setEditingPostId(post.id);
+    setNewPost({
+      title: post.title || '',
+      client_id: post.client_id || selectedClient?.id || clients[0]?.id || '',
+      channel: post.channel || 'Instagram',
+      format: post.format || 'Carrossel',
+      status: post.status || 'pauta',
+      scheduled_date: post.scheduled_date || new Date().toISOString().split('T')[0],
+      caption: post.caption || '',
+      visual_concept: post.visual_concept || '',
+      post_url: post.post_url || '',
+      medical_compliance_checked: Boolean(post.medical_compliance_checked),
+    });
+    setShowNewModal(true);
+  };
 
   // Form de fechamento mensal
   const [metricForm, setMetricForm] = useState({
@@ -91,25 +117,20 @@ export default function BuzzMonitorView() {
       return;
     }
 
-    const saved = await createPost({
+    const payload = {
       ...newPost,
-      client_id: isAllClients ? newPost.client_id : selectedClient?.id
-    });
+      title: newPost.title.trim(),
+      client_id: isAllClients ? newPost.client_id : (selectedClient?.id || newPost.client_id),
+    };
+
+    const saved = editingPostId
+      ? await updatePost(editingPostId, payload)
+      : await createPost(payload);
 
     if (!saved) return;
     setShowNewModal(false);
-    setNewPost({
-      title: '',
-      client_id: selectedClient?.id || clients[0]?.id || '',
-      channel: 'Instagram',
-      format: 'Carrossel',
-      status: 'pauta',
-      scheduled_date: new Date().toISOString().split('T')[0],
-      caption: '',
-      visual_concept: '',
-      post_url: '',
-      medical_compliance_checked: false
-    });
+    setEditingPostId(null);
+    setNewPost(emptyPostForm());
   };
 
   const handleSaveMetric = async (e) => {
@@ -223,8 +244,8 @@ Seja direto e prático.`;
 
             {activeTab === 'grade' && (
               <button
-                onClick={() => setShowNewModal(true)}
-                className="bg-cs-primary hover:bg-yellow-400 text-black px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-cs-primary/20 shrink-0"
+                onClick={openNewPostModal}
+                className="bg-cs-primary hover:bg-yellow-400 text-black px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-cs-primary/20 shrink-0 cursor-pointer"
               >
                 <Plus size={16} /> Nova Pauta
               </button>
@@ -284,8 +305,8 @@ Seja direto e prático.`;
                   Cadastre as postagens oficiais deste cliente para organizar o calendário editorial da agência.
                 </p>
                 <button
-                  onClick={() => setShowNewModal(true)}
-                  className="bg-cs-primary text-black px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                  onClick={openNewPostModal}
+                  className="bg-cs-primary text-black px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus size={16} /> Cadastrar Primeira Pauta
                 </button>
@@ -349,7 +370,7 @@ Seja direto e prático.`;
                         return label && <p className="text-xs text-cs-text-secondary">{label}</p>;
                       })()}
                       {/* Footer com Ações */}
-                      <div className="pt-3 border-t border-cs-border/60 flex items-center justify-between mt-3">
+                      <div className="pt-3 border-t border-cs-border/60 flex flex-wrap items-center justify-between gap-2 mt-3">
                         <select
                           value={post.status}
                           onChange={(e) => updatePostStatus(post.id, e.target.value)}
@@ -364,8 +385,26 @@ Seja direto e prático.`;
                         </select>
 
                         <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditPostModal(post)}
+                            aria-label={`Editar pauta ${post.title}`}
+                            className="p-1.5 text-cs-text-secondary hover:text-white rounded-lg hover:bg-cs-bg transition-colors cursor-pointer"
+                            title="Editar pauta"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          {post.task_id && (
+                            <button
+                              type="button"
+                              onClick={() => window.dispatchEvent(new CustomEvent('csag:navigate', { detail: { view: 'producao', clientId: post.client_id } }))}
+                              className="text-xs text-zinc-300 hover:text-white underline cursor-pointer"
+                            >
+                              Ver no Kanban
+                            </button>
+                          )}
                           <button type="button" disabled={busy} onClick={() => openApproval(post)}
-                            className="text-xs text-cs-primary underline">Aprovação</button>
+                            className="text-xs text-cs-primary underline cursor-pointer">Aprovação</button>
                           {post.post_url && (
                             <a
                               href={post.post_url}
@@ -378,8 +417,9 @@ Seja direto e prático.`;
                             </a>
                           )}
                           <button
+                            type="button"
                             onClick={() => deletePost(post.id)}
-                            className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-cs-bg transition-colors"
+                            className="p-1.5 text-cs-text-secondary hover:text-red-400 rounded-lg hover:bg-cs-bg transition-colors cursor-pointer"
                             title="Remover pauta"
                           >
                             <Trash2 size={14} />
@@ -404,12 +444,21 @@ Seja direto e prático.`;
               </p>
 
               {!selectedClient ? <p className="text-sm text-cs-text-secondary">Selecione um cliente para consultar os canais cadastrados.</p>
-                : <div className="flex flex-wrap gap-4 text-sm">
-                  {instagramHandle && <a className="text-cs-primary underline" href={'https://www.instagram.com/' + instagramHandle}
-                    target="_blank" rel="noreferrer">Instagram @{instagramHandle}</a>}
-                  {facebookUrl && <a className="text-cs-primary underline" href={facebookUrl}
-                    target="_blank" rel="noreferrer">Abrir página no Facebook</a>}
-                  {!instagramHandle && !facebookUrl && <p className="text-cs-text-secondary">A ficha deste cliente ainda não tem canais cadastrados.</p>}
+                : <div className="flex flex-wrap items-center justify-between gap-4 text-sm">
+                  <div className="flex flex-wrap gap-4">
+                    {instagramHandle && <a className="text-cs-primary underline" href={'https://www.instagram.com/' + instagramHandle}
+                      target="_blank" rel="noreferrer">Instagram @{instagramHandle}</a>}
+                    {facebookUrl && <a className="text-cs-primary underline" href={facebookUrl}
+                      target="_blank" rel="noreferrer">Abrir página no Facebook</a>}
+                    {!instagramHandle && !facebookUrl && <p className="text-cs-text-secondary">A ficha deste cliente ainda não tem canais cadastrados.</p>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('csag:navigate', { detail: { view: 'clientes', clientId: selectedClient.id, tab: 'brand' } }))}
+                    className="bg-cs-bg hover:bg-white/5 border border-cs-border text-cs-primary px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    Configurar Canais no Brand Kit
+                  </button>
                 </div>}
             </div>
 
@@ -462,11 +511,11 @@ Seja direto e prático.`;
                       {metrics.map(m => (
                         <tr key={m.id} className="text-white hover:bg-cs-bg/50">
                           <td className="py-3 px-3 font-bold font-mono text-cs-primary">{m.period_month}</td>
-                          <td className="py-3 px-3">{m.followers_total?.toLocaleString('pt-BR') || '—'}</td>
+                          <td className="py-3 px-3">{m.followers_total?.toLocaleString('pt-BR') || '-'}</td>
                           <td className="py-3 px-3 text-emerald-400 font-bold">+{m.followers_growth || 0}</td>
-                          <td className="py-3 px-3">{m.reach_organic?.toLocaleString('pt-BR') || '—'}</td>
-                          <td className="py-3 px-3">{m.total_interactions?.toLocaleString('pt-BR') || '—'}</td>
-                          <td className="py-3 px-3 text-cs-text-secondary truncate max-w-xs">{m.top_post_note || '—'}</td>
+                          <td className="py-3 px-3">{m.reach_organic?.toLocaleString('pt-BR') || '-'}</td>
+                          <td className="py-3 px-3">{m.total_interactions?.toLocaleString('pt-BR') || '-'}</td>
+                          <td className="py-3 px-3 text-cs-text-secondary truncate max-w-xs">{m.top_post_note || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -478,18 +527,20 @@ Seja direto e prático.`;
         )}
       </div>
 
-      {/* Modal Nova Pauta */}
+      {/* Modal Nova Pauta / Editar Pauta */}
       {showNewModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-xl p-6 shadow-2xl relative">
+          <div className="bg-cs-surface border border-cs-border rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl relative custom-scrollbar">
             <button
-              onClick={() => setShowNewModal(false)}
-              className="absolute top-5 right-5 text-cs-text-secondary hover:text-white"
+              onClick={() => { setShowNewModal(false); setEditingPostId(null); }}
+              className="absolute top-5 right-5 text-cs-text-secondary hover:text-white cursor-pointer"
             >
               <X size={20} />
             </button>
 
-            <h2 className="text-lg font-bold text-white mb-1">Cadastrar Nova Pauta de Conteúdo</h2>
+            <h2 className="text-lg font-bold text-white mb-1">
+              {editingPostId ? 'Editar Pauta de Conteúdo' : 'Cadastrar Nova Pauta de Conteúdo'}
+            </h2>
             <p className="text-xs text-cs-text-secondary mb-5">
               Cliente: <strong className="text-white">{selectedClient?.name || 'Cliente Ativo'}</strong>
             </p>
@@ -588,19 +639,42 @@ Seja direto e prático.`;
                 />
               </div>
 
+              <div>
+                <label className="text-xs font-semibold text-white mb-1 block">URL do Post Publicado (opcional)</label>
+                <input
+                  type="url"
+                  value={newPost.post_url}
+                  onChange={e => setNewPost({ ...newPost, post_url: e.target.value })}
+                  placeholder="https://www.instagram.com/p/..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
+                />
+              </div>
+
+              {isMedicalClient && (
+                <label className="flex items-center gap-2 text-xs text-blue-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(newPost.medical_compliance_checked)}
+                    onChange={e => setNewPost({ ...newPost, medical_compliance_checked: e.target.checked })}
+                    className="rounded border-cs-border bg-cs-bg text-cs-primary"
+                  />
+                  <span>Revisão clínica e normas do conselho conferidas para este conteúdo</span>
+                </label>
+              )}
+
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-cs-text-secondary hover:text-white"
+                  onClick={() => { setShowNewModal(false); setEditingPostId(null); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-cs-text-secondary hover:text-white cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="bg-cs-primary hover:bg-yellow-400 text-black px-5 py-2 rounded-xl text-xs font-bold transition-all"
+                  className="bg-cs-primary hover:bg-yellow-400 text-black px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
-                  Salvar Pauta
+                  {editingPostId ? 'Salvar Alterações' : 'Salvar Pauta'}
                 </button>
               </div>
             </form>

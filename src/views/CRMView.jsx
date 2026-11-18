@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { 
   Building2, Phone, Mail, Percent, Plus, X, User, Trash2, ChevronLeft, ChevronRight, 
-  Sparkles, Copy, Edit3, MessageCircle, DollarSign, CheckCircle2, ArrowRight, FileText,
-  AlertTriangle, RotateCcw, MessageSquare
+  Sparkles, Edit3, MessageCircle, CheckCircle2, FileText,
+  AlertTriangle, RotateCcw, MessageSquare, Rocket, CalendarClock, Copy
 } from 'lucide-react';
 import RegistrationLinkModal from '../components/RegistrationLinkModal';
 import { useDeals } from '../hooks/useDeals';
@@ -26,10 +26,86 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0);
 }
 
-function isMobileNumber(phone) {
-  if (!phone) return false;
+function normalizePhoneDigits(phone) {
+  if (!phone) return '';
   const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
+function formatWhatsAppNumber(phone) {
+  if (!phone) return '';
+  const clean = phone.replace(/\D/g, '');
+  if (!clean) return '';
+  return clean.length === 10 || clean.length === 11 ? `55${clean}` : clean;
+}
+
+function isMobileNumber(phone) {
+  const digits = normalizePhoneDigits(phone);
   return (digits.length === 11 && digits[2] === '9') || (digits.length === 9 && digits[0] === '9');
+}
+
+function extractWhatsAppUrlFromNotes(notes) {
+  if (!notes) return null;
+  const match = notes.match(/https:\/\/wa\.me\/[^\s)]+/i);
+  return match ? match[0] : null;
+}
+
+function extractOutreachFromNotes(notes) {
+  if (!notes) return null;
+  const match = notes.match(/^Abordagem:\s*(.+)$/im);
+  return match ? match[1].trim() : null;
+}
+
+function hasWhatsAppTarget(deal) {
+  return Boolean(
+    extractWhatsAppUrlFromNotes(deal?.notes) ||
+    normalizePhoneDigits(deal?.contact_phone).length >= 10
+  );
+}
+
+function buildDealWhatsAppUrl(deal, customText = '') {
+  if (!customText) {
+    const directUrl = extractWhatsAppUrlFromNotes(deal?.notes);
+    if (directUrl) return directUrl;
+  }
+
+  let number = formatWhatsAppNumber(deal?.contact_phone);
+  if (!number) {
+    const notesUrl = extractWhatsAppUrlFromNotes(deal?.notes);
+    const numMatch = notesUrl?.match(/wa\.me\/(\d+)/i);
+    if (numMatch) number = numMatch[1];
+  }
+  if (!number) return null;
+
+  const rawContact = (deal?.contact || '').trim();
+  const greetingName = rawContact && !['Decisor / Comercial', 'Contato'].includes(rawContact)
+    ? `, ${rawContact}`
+    : '';
+  const defaultMessage = extractOutreachFromNotes(deal?.notes) ||
+    `Olá${greetingName}! Sou o Bruno da Comunicação Social Ag (CS Ag). Fizemos um levantamento da presença digital da ${deal?.company || 'empresa'} e gostaria de compartilhar algumas oportunidades práticas com você.`;
+
+  const msg = encodeURIComponent(customText || defaultMessage);
+  return `https://wa.me/${number}?text=${msg}`;
+}
+
+function getFollowUpIsoDate(days = 3) {
+  const target = new Date();
+  target.setDate(target.getDate() + days);
+  const yyyy = target.getFullYear();
+  const mm = String(target.getMonth() + 1).padStart(2, '0');
+  const dd = String(target.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getTodayIsoDate() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function callPhone(phone) {
@@ -39,17 +115,6 @@ function callPhone(phone) {
   }
   const clean = phone.replace(/\D/g, '');
   window.location.href = `tel:${clean}`;
-}
-
-function openWhatsApp(phone, contactName, company) {
-  if (!phone) {
-    toast.error('Telefone não informado para este contato.');
-    return;
-  }
-  const clean = phone.replace(/\D/g, '');
-  const number = clean.length === 10 || clean.length === 11 ? `55${clean}` : clean;
-  const msg = encodeURIComponent(`Olá ${contactName ? contactName : ''}! Sou o Bruno da Comunicação Social Ag (CS Ag). Gostaria de conversar sobre a estratégia e presença digital da ${company}.`);
-  window.open(`https://wa.me/${number}?text=${msg}`, '_blank');
 }
 
 function openEmail(email, contactName, company) {
@@ -307,7 +372,7 @@ function DeleteConfirmModal({ deal, onConfirm, onCancel }) {
 }
 
 // Modal de Detalhes e Edição Integral do Negócio
-function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, onMoveStage, onOpenAi, clients }) {
+function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, onMoveStage, onOpenAi, onOpenRegistration, onOpenOnboarding, onWhatsAppOutreach, clients }) {
   const [form, setForm] = useState({
     company: deal.company || '',
     contact: deal.contact || '',
@@ -320,12 +385,14 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
     notes: deal.notes || '',
     next_action: deal.next_action || '',
     follow_up_on: deal.follow_up_on || '',
+    client_id: deal.client_id || '',
   });
 
   const [isSaving, setIsSaving] = useState(false);
 
   // Vincular com dados do cadastro de cliente se existirem
   const matchedClient = clients?.find(c => 
+    (form.client_id && c.id === form.client_id) ||
     (deal.client_id && c.id === deal.client_id) || 
     (c.name && deal.company && c.name.toLowerCase() === deal.company.toLowerCase())
   );
@@ -352,6 +419,7 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
         notes: form.notes,
         next_action: form.next_action.trim(),
         follow_up_on: form.follow_up_on,
+        client_id: form.client_id || null,
       });
       if (saved) onClose();
     } catch {
@@ -362,10 +430,12 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
   };
 
   const handleStageChange = async (newStage) => {
-    if (await onMoveStage(deal.id, newStage)) setForm(current => ({
-      ...current, status: newStage,
-      ...(newStage === 'ganho' ? { next_action: '', follow_up_on: '' } : {}),
-    }));
+    if (await onMoveStage(deal.id, newStage, form.client_id || matchedClient?.id || null)) {
+      setForm(current => ({
+        ...current, status: newStage,
+        ...(newStage === 'ganho' ? { next_action: '', follow_up_on: '' } : {}),
+      }));
+    }
   };
 
   return (
@@ -401,25 +471,35 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
         <div className="px-6 py-3 bg-cs-bg/30 border-b border-cs-border flex flex-wrap gap-2 items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-xs text-cs-text-secondary font-medium">Canais rápidos:</span>
-            {form.contact_phone ? (
-              isMobileNumber(form.contact_phone) ? (
-                <button
-                  type="button"
-                  onClick={() => openWhatsApp(form.contact_phone, form.contact, form.company)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer"
-                >
-                  <MessageCircle size={14} /> WhatsApp
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => callPhone(form.contact_phone)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30 hover:bg-sky-500/25 transition-colors cursor-pointer"
-                >
-                  <Phone size={14} /> Ligar ({form.contact_phone})
-                </button>
-              )
-            ) : (
+            {hasWhatsAppTarget({ ...deal, ...form }) && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const scheduled = await onWhatsAppOutreach?.({ ...deal, ...form });
+                  if (scheduled) {
+                    setForm(current => ({
+                      ...current,
+                      follow_up_on: scheduled.follow_up_on,
+                      next_action: scheduled.next_action,
+                    }));
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+                title="Abrir link wa.me e agendar follow-up automático para +3 dias"
+              >
+                <MessageCircle size={14} /> WhatsApp (+3d)
+              </button>
+            )}
+            {form.contact_phone && !isMobileNumber(form.contact_phone) && (
+              <button
+                type="button"
+                onClick={() => callPhone(form.contact_phone)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30 hover:bg-sky-500/25 transition-colors cursor-pointer"
+              >
+                <Phone size={14} /> Ligar ({form.contact_phone})
+              </button>
+            )}
+            {!hasWhatsAppTarget({ ...deal, ...form }) && !form.contact_phone && (
               <span className="text-xs text-zinc-500 italic">Sem telefone cadastrado</span>
             )}
 
@@ -567,6 +647,56 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
 
           <FollowUpFields form={form} setForm={setForm} />
 
+          {/* Vínculo com Cliente Oficial e Handoff para Onboarding */}
+          <div className="bg-cs-bg/50 border border-cs-border rounded-xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs text-cs-text-secondary font-medium">Conta / Cliente Oficial Vinculado</label>
+              <div className="flex flex-wrap items-center gap-2">
+                {onOpenRegistration && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenRegistration({ ...deal, company: form.company, contact: form.contact, contact_phone: form.contact_phone, value: form.value, client_id: matchedClient?.id || form.client_id })}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <MessageSquare size={12} /> Enviar Ficha (/cadastro)
+                  </button>
+                )}
+                {matchedClient && onOpenOnboarding && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenOnboarding(matchedClient.id);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-cs-primary text-black flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Rocket size={12} /> Abrir Onboarding & Brand Kit
+                  </button>
+                )}
+                {form.status === 'ganho' && !deal.onboarding_task_id && (
+                  <button
+                    type="button"
+                    onClick={() => onMoveStage(deal.id, 'ganho', form.client_id || matchedClient?.id || null)}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CheckCircle2 size={12} /> Concluir Handoff para Produção
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <select
+              value={form.client_id}
+              onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))}
+              className="w-full bg-cs-surface border border-cs-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary"
+            >
+              <option value="">Criar novo cliente ao fechar (ou detectar pelo nome)</option>
+              {(clients || []).map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Diagnóstico Comercial & Notas */}
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -643,16 +773,62 @@ function DealDetailModal({ deal, onClose, onUpdate, onDelete, onRequestDelete, o
 
 export default function CRMView() {
   const { deals, loading, error, serverMode, moveDeal, closeDeal, createDeal, updateDeal, importDeal, deleteDeal, restoreDeal, restoreMissingDefaults, refetch } = useDeals();
-  const { clients, createClient, refetch: refreshClients } = useClients();
+  const { clients, createClient, updateClient, refetch: refreshClients } = useClients();
   const { createTask, remoteMode, refresh: refreshTasks } = useTasks();
   const closing = useRef(new Set());
   const { setContext } = useAIAssistant();
   
   const [showNewDealModal, setShowNewDealModal] = useState(false);
-  const [showRegistrationLinkModal, setShowRegistrationLinkModal] = useState(false);
+  const [registrationContext, setRegistrationContext] = useState(null);
   const [selectedAiDeal, setSelectedAiDeal] = useState(null);
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [dealToDelete, setDealToDelete] = useState(null);
+
+  const openClientOnboarding = (clientId) => {
+    if (!clientId) return;
+    window.dispatchEvent(new CustomEvent('csag:navigate', {
+      detail: { view: 'clientes', clientId, clientTab: 'onboarding' },
+    }));
+  };
+
+  const todayIso = getTodayIsoDate();
+
+  const handleWhatsAppOutreach = async (deal, customText = '') => {
+    const url = buildDealWhatsAppUrl(deal, customText);
+    if (!url) {
+      toast.error('Informe um telefone ou link wa.me para abordar no WhatsApp.');
+      return null;
+    }
+
+    window.open(url, '_blank', 'noopener,noreferrer');
+
+    if (['ganho', 'perdido'].includes(deal.status)) {
+      return null;
+    }
+
+    const followUpDate = getFollowUpIsoDate(3);
+    const nextAction = 'Fazer follow-up da abordagem no WhatsApp';
+    const changes = {
+      follow_up_on: followUpDate,
+      next_action: nextAction,
+    };
+
+    let saved = false;
+    if (deal.localOnly && serverMode) {
+      const imported = await importDeal({ ...deal, ...changes });
+      saved = Boolean(imported);
+    } else {
+      saved = await updateDeal(deal.id, changes);
+    }
+
+    if (saved) {
+      setSelectedDeal(previous => previous?.id === deal.id ? { ...previous, ...changes } : previous);
+      const formattedDate = followUpDate.split('-').reverse().join('/');
+      toast.success(`Follow-up agendado para ${formattedDate} (+3 dias).`);
+      return changes;
+    }
+    return null;
+  };
 
   const handleConfirmDelete = async () => {
     if (!dealToDelete) return;
@@ -679,7 +855,7 @@ export default function CRMView() {
     ), { duration: 6000 });
   };
 
-  const handleMoveDeal = async (dealId, newStatus) => {
+  const handleMoveDeal = async (dealId, newStatus, explicitClientId = null) => {
     const deal = deals.find(item => item.id === dealId);
     if (!deal || closing.current.has(dealId)) return false;
     if (deal.localOnly) {
@@ -690,11 +866,18 @@ export default function CRMView() {
 
     closing.current.add(dealId);
     try {
+      const resolveClientId = explicitClientId || deal.client_id || clients.find(client =>
+        (!serverMode || /^[a-f0-9-]{36}$/i.test(client.id)) &&
+        client.name?.trim().toLocaleLowerCase('pt-BR') === deal.company.trim().toLocaleLowerCase('pt-BR')
+      )?.id || null;
+
       if (newStatus === 'ganho' && serverMode) {
-        const existing = clients.find(client => /^[a-f0-9-]{36}$/i.test(client.id) &&
-          client.name?.trim().toLocaleLowerCase('pt-BR') === deal.company.trim().toLocaleLowerCase('pt-BR'));
-        const closed = await closeDeal(dealId, existing?.id);
+        const closed = await closeDeal(dealId, resolveClientId);
         if (!closed) return false;
+        const linkedClient = clients.find(c => c.id === closed.client_id);
+        if (linkedClient && Number(linkedClient.monthly_fee || 0) === 0 && Number(deal.value || 0) > 0) {
+          await updateClient({ ...linkedClient, monthly_fee: Number(deal.value), deal_id: deal.id });
+        }
         setSelectedDeal(previous => previous?.id === dealId ? closed : previous);
         window.dispatchEvent(new Event('csag:remote-clients-changed'));
         await Promise.allSettled([refreshTasks(), refreshClients()]);
@@ -703,7 +886,7 @@ export default function CRMView() {
       }
 
       if (newStatus === 'ganho') {
-        const clientId = await operationId(`onboarding-cliente-${dealId}`, remoteMode);
+        const clientId = resolveClientId || await operationId(`onboarding-cliente-${dealId}`, remoteMode);
         const matchingClient = clients.find(item => item.id === clientId
           || (item.name?.trim().toLocaleLowerCase('pt-BR') === deal.company.trim().toLocaleLowerCase('pt-BR')
             && (!remoteMode || /^[a-f0-9-]{36}$/i.test(item.id))));
@@ -713,10 +896,16 @@ export default function CRMView() {
           contact_name: deal.contact,
           contact_email: deal.contact_email || '',
           contact_phone: deal.contact_phone || '',
+          monthly_fee: Number(deal.value) || 0,
+          deal_id: deal.id,
           status: 'active',
           lifecycle_stage: 'onboarding',
         }, { handoff: true });
         if (!client) return false;
+
+        if (matchingClient && Number(matchingClient.monthly_fee || 0) === 0 && Number(deal.value || 0) > 0) {
+          await updateClient({ ...matchingClient, monthly_fee: Number(deal.value), deal_id: deal.id });
+        }
 
         const task = await createTask({
           id: await operationId(`onboarding-tarefa-${dealId}`, remoteMode),
@@ -732,11 +921,15 @@ export default function CRMView() {
           toast.error('Cliente registrado. Repita o fechamento para retomar o onboarding.');
           return false;
         }
+        await updateDeal(dealId, { client_id: client.id, onboarding_task_id: task.id, status: 'ganho' });
+        setSelectedDeal(previous => previous?.id === dealId ? { ...previous, status: 'ganho', client_id: client.id, onboarding_task_id: task.id } : previous);
+        toast.success('Negócio fechado. A próxima ação está em Produção.');
+        return true;
       }
 
       if (!await moveDeal(dealId, newStatus)) return false;
       setSelectedDeal(previous => previous?.id === dealId ? { ...previous, status: newStatus } : previous);
-      toast.success(newStatus === 'ganho' ? 'Negócio fechado. A próxima ação está em Produção.' : 'Estágio atualizado.');
+      toast.success('Estágio atualizado.');
       return true;
     } catch {
       toast.error('Não foi possível concluir a mudança. Tente novamente.');
@@ -778,7 +971,7 @@ export default function CRMView() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setShowRegistrationLinkModal(true)}
+            onClick={() => setRegistrationContext({})}
             className="bg-[#25D366] hover:bg-[#20ba5a] text-black px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all shadow-md shadow-[#25D366]/20 flex items-center gap-1.5 cursor-pointer"
             title="Enviar link seguro de cadastro para início de contrato via WhatsApp"
           >
@@ -881,30 +1074,17 @@ export default function CRMView() {
                           <span className="truncate max-w-[150px]">{deal.contact || 'Contato'}</span>
                         </div>
 
-                        {deal.contact_phone && (
-                          isMobileNumber(deal.contact_phone) ? (
-                            <span 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openWhatsApp(deal.contact_phone, deal.contact, deal.company);
-                              }}
-                              className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/20 transition-colors cursor-pointer"
-                              title="Conversar no WhatsApp"
-                            >
-                              <MessageCircle size={10} /> WhatsApp
-                            </span>
-                          ) : (
-                            <span 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                callPhone(deal.contact_phone);
-                              }}
-                              className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 px-1.5 py-0.5 rounded border border-sky-500/20 transition-colors cursor-pointer"
-                              title={`Ligar para telefone fixo (${deal.contact_phone})`}
-                            >
-                              <Phone size={10} /> Fixo
-                            </span>
-                          )
+                        {deal.contact_phone && !isMobileNumber(deal.contact_phone) && (
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              callPhone(deal.contact_phone);
+                            }}
+                            className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 px-1.5 py-0.5 rounded border border-sky-500/20 transition-colors cursor-pointer"
+                            title={`Ligar para telefone fixo (${deal.contact_phone})`}
+                          >
+                            <Phone size={10} /> Fixo
+                          </span>
                         )}
 
                         {deal.contact_email && (
@@ -934,10 +1114,17 @@ export default function CRMView() {
                         </button>
                       )}
                       {(deal.next_action || deal.follow_up_on) && !['ganho', 'perdido'].includes(deal.status) && (
-                        <p className="mt-2 text-xs text-cs-text-secondary">
-                          {deal.follow_up_on && <time dateTime={deal.follow_up_on}>{deal.follow_up_on.split('-').reverse().join('/')} </time>}
-                          {deal.next_action || 'Retomar contato'}
-                        </p>
+                        <div className={`mt-2 px-2.5 py-1.5 rounded-lg border text-[11px] flex items-center gap-1.5 ${
+                          deal.follow_up_on && deal.follow_up_on <= todayIso
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300 font-medium'
+                            : 'bg-cs-bg/80 border-cs-border text-cs-text-secondary'
+                        }`}>
+                          <CalendarClock size={12} className="shrink-0" />
+                          <span className="truncate">
+                            {deal.follow_up_on && <time dateTime={deal.follow_up_on} className="font-semibold">{deal.follow_up_on.split('-').reverse().join('/')} · </time>}
+                            {deal.next_action || 'Retomar contato'}
+                          </span>
+                        </div>
                       )}
 
                       {/* Diagnóstico / Anotações do Prospect */}
@@ -962,8 +1149,29 @@ export default function CRMView() {
                         </div>
                       </div>
 
+                      {/* Botão Direto de Abordagem no WhatsApp + Agendamento Automático (+3 dias) */}
+                      {hasWhatsAppTarget(deal) && !['ganho', 'perdido'].includes(deal.status) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleWhatsAppOutreach(deal);
+                          }}
+                          className="mt-3 w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-black border border-emerald-500/30 rounded-lg text-xs font-bold transition-all flex items-center justify-between gap-2 cursor-pointer"
+                          title="Abrir link wa.me no WhatsApp e agendar retorno automático para +3 dias"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <MessageCircle size={14} />
+                            <span>{deal.follow_up_on ? 'Reabordar no WhatsApp' : 'Abordar no WhatsApp'}</span>
+                          </span>
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-black/25 border border-current/20">
+                            +3d
+                          </span>
+                        </button>
+                      )}
+
                       {/* Barra de Ações do Card */}
-                      <div className="mt-3 pt-2.5 border-t border-cs-border/80 flex items-center gap-1.5">
+                      <div className="mt-2.5 pt-2.5 border-t border-cs-border/80 flex items-center gap-1.5">
                         <button 
                           type="button"
                           onClick={(e) => {
@@ -989,32 +1197,32 @@ export default function CRMView() {
                           <Sparkles size={13} />
                         </button>
 
-                        {deal.contact_phone && (
-                          isMobileNumber(deal.contact_phone) ? (
-                            <button 
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openWhatsApp(deal.contact_phone, deal.contact, deal.company);
-                              }}
-                              className="p-1.5 bg-cs-bg hover:bg-emerald-500/20 border border-cs-border hover:border-emerald-500/30 text-cs-text-secondary hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
-                              title="Conversar no WhatsApp"
-                            >
-                              <MessageCircle size={13} />
-                            </button>
-                          ) : (
-                            <button 
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                callPhone(deal.contact_phone);
-                              }}
-                              className="p-1.5 bg-cs-bg hover:bg-sky-500/20 border border-cs-border hover:border-sky-500/30 text-cs-text-secondary hover:text-sky-400 rounded-lg transition-colors cursor-pointer"
-                              title={`Ligar para fixo (${deal.contact_phone})`}
-                            >
-                              <Phone size={13} />
-                            </button>
-                          )
+                        {hasWhatsAppTarget(deal) && ['ganho', 'perdido'].includes(deal.status) && (
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleWhatsAppOutreach(deal);
+                            }}
+                            className="p-1.5 bg-cs-bg hover:bg-emerald-500/20 border border-cs-border hover:border-emerald-500/30 text-cs-text-secondary hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
+                            title="Conversar no WhatsApp"
+                          >
+                            <MessageCircle size={13} />
+                          </button>
+                        )}
+
+                        {deal.contact_phone && !isMobileNumber(deal.contact_phone) && (
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              callPhone(deal.contact_phone);
+                            }}
+                            className="p-1.5 bg-cs-bg hover:bg-sky-500/20 border border-cs-border hover:border-sky-500/30 text-cs-text-secondary hover:text-sky-400 rounded-lg transition-colors cursor-pointer"
+                            title={`Ligar para fixo (${deal.contact_phone})`}
+                          >
+                            <Phone size={13} />
+                          </button>
                         )}
 
                         {deal.contact_email && (
@@ -1099,6 +1307,16 @@ export default function CRMView() {
           onRequestDelete={(deal) => setDealToDelete(deal)}
           onMoveStage={handleMoveDeal}
           onOpenAi={(deal) => setSelectedAiDeal(deal)}
+          onOpenRegistration={(dealObj) => setRegistrationContext({
+            dealId: dealObj.id,
+            clientId: dealObj.client_id || '',
+            company: dealObj.company,
+            contact: dealObj.contact,
+            phone: dealObj.contact_phone,
+            value: dealObj.value,
+          })}
+          onOpenOnboarding={openClientOnboarding}
+          onWhatsAppOutreach={handleWhatsAppOutreach}
         />
       )}
 
@@ -1115,6 +1333,7 @@ export default function CRMView() {
       {selectedAiDeal && (
         <AIProspectingModal
           deal={selectedAiDeal}
+          onWhatsAppOutreach={handleWhatsAppOutreach}
           onClose={() => setSelectedAiDeal(null)}
         />
       )}
@@ -1128,17 +1347,18 @@ export default function CRMView() {
       )}
 
       {/* Modal de Link de Cadastro para Início de Contrato */}
-      {showRegistrationLinkModal && (
+      {registrationContext !== null && (
         <RegistrationLinkModal
-          isOpen={showRegistrationLinkModal}
-          onClose={() => setShowRegistrationLinkModal(false)}
+          isOpen={true}
+          context={registrationContext}
+          onClose={() => setRegistrationContext(null)}
         />
       )}
     </div>
   );
 }
 
-function AIProspectingModal({ deal, onClose }) {
+function AIProspectingModal({ deal, onWhatsAppOutreach, onClose }) {
   const [activeTab, setActiveTab] = useState('prospeccao'); // 'prospeccao' | 'respostas'
   const [copyType, setCopyType] = useState('whatsapp'); // 'whatsapp' | 'email' | 'pitch'
   const [selectedObjection, setSelectedObjection] = useState('');
@@ -1149,8 +1369,7 @@ function AIProspectingModal({ deal, onClose }) {
   const [copiedA, setCopiedA] = useState(false);
   const [copiedB, setCopiedB] = useState(false);
 
-  const cleanPhone = (deal.contact_phone || '').replace(/\D/g, '');
-  const waNumber = cleanPhone.length === 10 || cleanPhone.length === 11 ? `55${cleanPhone}` : cleanPhone;
+  const waNumber = formatWhatsAppNumber(deal.contact_phone);
 
   const COMMON_OBJECTIONS = [
     { id: 'preco', label: 'Preço alto / fora do orçamento', text: 'Achei o valor de R$ 1.800/mês um pouco puxado para o momento.' },
@@ -1235,11 +1454,15 @@ Regras CS Ag: nunca use travessão longo. Seja humano, empático e resolutivo.`;
   };
 
   const handleOpenWhatsApp = (text) => {
+    if (onWhatsAppOutreach) {
+      onWhatsAppOutreach(deal, text);
+      return;
+    }
     if (!waNumber) {
       toast.error('Telefone não informado para este contato.');
       return;
     }
-    window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`, '_blank');
+    window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
   return (

@@ -3,6 +3,8 @@ import { Bot, Sparkles, Send, FileText, PenTool, BarChart, Rocket, Check, Plus, 
 import { cn } from '../utils/cn';
 import { chatWithAgent, isGeminiConfigured, isAIConfigured } from '../lib/gemini';
 import { useTasks } from '../hooks/useTasks';
+import { useActiveClient } from '../contexts/ActiveClientContext';
+import toast from 'react-hot-toast';
 
 const AGENTS = [
   { id: 'brief', name: 'Assistente de Briefing', icon: FileText, desc: 'Gera briefs completos a partir de textos curtos do cliente.' },
@@ -95,6 +97,7 @@ export default function AILayerView() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const { createTask } = useTasks();
+  const { selectedClient, clients } = useActiveClient();
 
   const messages = conversations[activeAgent] || [];
   const selectedAgent = AGENTS.find(a => a.id === activeAgent);
@@ -150,21 +153,24 @@ export default function AILayerView() {
   };
 
   const handleAddTasksToKanban = async (tasks) => {
+    const targetClient = selectedClient || clients?.[0] || null;
     for (const task of tasks) {
       await createTask({
         title: task.title,
-        assigned_to: task.assigned_to,
+        assigned_to: task.assigned_to || 'Bruno',
         status: task.status || 'backlog',
-        deadline: task.deadline,
-        tag: task.tag,
+        deadline: task.deadline || null,
+        tag: task.tag || 'Campanha',
+        client_id: task.client_id || targetClient?.id || null,
+        client_name: task.client_name || targetClient?.name || '',
       });
     }
-    // Confirm feedback
+    toast.success(`${tasks.length} tarefa(s) enviada(s) ao Kanban.`);
     setConversations(prev => ({
       ...prev,
       [activeAgent]: [...(prev[activeAgent] || []), {
         role: 'ai',
-        text: `✅ ${tasks.length} tarefas adicionadas ao Kanban com sucesso! Acesse o módulo de Produção para visualizá-las.`,
+        text: `✅ ${tasks.length} tarefas adicionadas ao Kanban${targetClient ? ` (${targetClient.name})` : ''} com sucesso! Acesse o módulo de Produção para visualizá-las.`,
       }],
     }));
   };
@@ -305,7 +311,7 @@ export default function AILayerView() {
           </div>
           <div className="max-w-3xl mx-auto mt-2 flex items-center justify-center gap-2 text-[10px] text-cs-text-secondary">
             <Sparkles size={10} className="text-cs-accent" />
-            Powered by Gemini (Google) + ChatGPT (OpenAI) — Fallback automático. Enter para enviar, Shift+Enter para nova linha.
+            Powered by Gemini (Google) + ChatGPT (OpenAI): Fallback automático. Enter para enviar, Shift+Enter para nova linha.
           </div>
         </div>
       </div>

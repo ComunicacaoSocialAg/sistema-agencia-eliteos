@@ -35,7 +35,7 @@ import { cn } from '../utils/cn';
 
 function formatDate(dateStr) {
   try { return format(parseISO(dateStr), "dd/MM/yyyy", { locale: ptBR }); }
-  catch { return dateStr || '—'; }
+  catch { return dateStr || '-'; }
 }
 
 // Modal de Nova Cobrança

@@ -2,9 +2,10 @@ import React, { useState, useRef, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useFocusTasks } from '../hooks/useFocusTasks';
 import { useTasks } from '../hooks/useTasks';
-import { useClients } from '../hooks/useClients';
+import { areIdsMatching, useClients } from '../hooks/useClients';
 import { useDeals } from '../hooks/useDeals';
 import { copyApprovalUrl, getPublicAppOrigin } from '../hooks/useDeliverables';
+import { operationId } from '../lib/operationId';
 import TaskModal from '../components/TaskModal';
 import {
   Zap,
@@ -38,9 +39,29 @@ export default function FocusActionView() {
     setTaskToFocus,
   } = useFocusTasks();
 
-  const { allTasks, updateTask, addComment, toggleChecklist } = useTasks(undefined, { showArchived: false });
+  const { allTasks, updateTask, addComment, toggleChecklist, createTask } = useTasks(undefined, { showArchived: false });
   const { totalMRR } = useClients();
   const { deals } = useDeals();
+
+  const scheduleFollowUp = async (task, deadline) => {
+    const client = clients.find(item =>
+      areIdsMatching(item.id, task.client_id, item.name, task.client_name));
+    if (!client) {
+      toast.error('Vincule a tarefa a um cliente antes de marcar o acompanhamento.');
+      return null;
+    }
+    return createTask({
+      id: await operationId(`acompanhamento-${task.id}-${deadline}`, remoteMode),
+      title: `Acompanhar: ${task.title}`,
+      client_id: client.id,
+      client_name: client.name,
+      deadline,
+      status: 'backlog',
+      tag: task.tag,
+      notes: `Acompanhamento da entrega "${task.title}".`,
+      external_links: (task.external_links || []).filter(link => link?.kind === 'delivery'),
+    });
+  };
 
   const [demandText, setDemandText] = useState('');
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -588,6 +609,7 @@ export default function FocusActionView() {
           onUpdate={updateTask}
           onAddComment={addComment}
           onToggleChecklist={toggleChecklist}
+          onScheduleFollowUp={scheduleFollowUp}
         />
       )}
     </div>

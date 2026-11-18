@@ -1,10 +1,13 @@
 import { useState } from 'react';
-import { X, Building2, CircleDollarSign, Share2, Bot, Save, Trash2, Check, ExternalLink } from 'lucide-react';
+import { X, Building2, CircleDollarSign, Share2, Bot, Save, Palette } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '../utils/cn';
+import { buildClientBrandPayload, getClientBrandKit, normalizeHexColor } from '../lib/brandKit';
 
 export default function ClientConfigModal({ client, onClose, onSave }) {
+  const brandKit = getClientBrandKit(client);
   const [activeTab, setActiveTab] = useState('geral');
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     id: client.id,
     name: client.name || '',
@@ -13,17 +16,27 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
     contact_email: client.contact_email || '',
     contact_phone: client.contact_phone || '',
     monthly_fee: client.monthly_fee || 0,
+    monthly_hours_contracted: client.monthly_hours_contracted || 10,
     billing_day: client.billing_day || '10',
     contract_start_date: client.contract_start_date || '',
-    brand_color: client.brand_color || '#3b82f6',
-    drive_url: client.drive_url || '',
+    primary_color: brandKit.primary_color,
+    secondary_color: brandKit.secondary_color,
+    accent_color: brandKit.accent_color,
+    typography: brandKit.typography,
+    logo_url: brandKit.logo_url,
+    keywordsText: brandKit.keywords.join(', '),
+    drive_url: brandKit.drive_url,
+    website: brandKit.website,
+    instagram: brandKit.instagram,
     reportei_url: client.reportei_url || '',
     reportei_config: client.reportei_config || { project_id: '' },
     tone_of_voice: client.tone_of_voice || '',
     target_audience: client.target_audience || '',
+    value_proposition: client.value_proposition || '',
     strategic_goals: client.strategic_goals || '',
     ai_instructions: client.ai_instructions || '',
-    status: client.status || 'active'
+    status: client.status || 'active',
+    lifecycle_stage: client.lifecycle_stage || 'onboarding',
   });
 
   const setField = (field, value) => {
@@ -36,27 +49,52 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
       toast.error('O nome do cliente é obrigatório.');
       return;
     }
-    
-    // Garantir que a estrutura de reportei_config contenha project_id se reportei_url for preenchido
+
     let reportei_config = form.reportei_config;
     if (form.reportei_url && !reportei_config?.project_id) {
-      reportei_config = { project_id: form.reportei_url.trim() };
+      reportei_config = { ...reportei_config, project_id: form.reportei_url.trim() };
     }
 
-    const saved = await onSave({
-      ...form,
-      monthly_fee: Number(form.monthly_fee) || 0,
-      reportei_config
-    });
-    if (saved) onClose();
+    setSaving(true);
+    try {
+      const withBrand = buildClientBrandPayload(client, {
+        ...form,
+        keywords: form.keywordsText,
+      });
+      const saved = await onSave({
+        ...withBrand,
+        name: form.name.trim(),
+        document_id: form.document_id.trim(),
+        contact_name: form.contact_name.trim(),
+        contact_email: form.contact_email.trim(),
+        contact_phone: form.contact_phone.trim(),
+        monthly_fee: Number(form.monthly_fee) || 0,
+        monthly_hours_contracted: Number(form.monthly_hours_contracted) || 10,
+        billing_day: form.billing_day,
+        contract_start_date: form.contract_start_date,
+        target_audience: form.target_audience,
+        value_proposition: form.value_proposition,
+        strategic_goals: form.strategic_goals,
+        status: form.status,
+        lifecycle_stage: form.lifecycle_stage,
+        reportei_url: form.reportei_url,
+        reportei_config,
+      });
+      if (saved) onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const tabs = [
     { id: 'geral', label: 'Dados Gerais', icon: Building2 },
-    { id: 'financeiro', label: 'Financeiro', icon: CircleDollarSign },
-    { id: 'integracoes', label: 'Drive & Reportei', icon: Share2 },
-    { id: 'ai', label: 'Instruções da IA', icon: Bot },
+    { id: 'marca', label: 'Brand Kit', icon: Palette },
+    { id: 'financeiro', label: 'Contrato & Fee', icon: CircleDollarSign },
+    { id: 'integracoes', label: 'Drive & Canais', icon: Share2 },
+    { id: 'ai', label: 'DNA & IA', icon: Bot },
   ];
+
+  const colorPreview = normalizeHexColor(form.primary_color, '#3b82f6');
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
@@ -64,39 +102,41 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
         {/* Header */}
         <div className="p-6 border-b border-cs-border flex items-center justify-between bg-cs-bg/50 shrink-0">
           <div className="flex items-center gap-3">
-            <div 
+            <div
               className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md"
-              style={{ backgroundColor: form.brand_color || '#3b82f6' }}
+              style={{ backgroundColor: colorPreview }}
             >
               {form.name.charAt(0) || 'C'}
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Configurações do Cliente</h2>
-              <p className="text-xs text-cs-text-secondary">Edite os parâmetros operacionais de {form.name}</p>
+              <p className="text-xs text-cs-text-secondary">Edite parâmetros operacionais e Brand Kit de {form.name}</p>
             </div>
           </div>
-          <button 
+          <button
+            type="button"
             onClick={onClose}
-            className="p-2 text-cs-text-secondary hover:text-white rounded-xl hover:bg-cs-bg transition-colors"
+            className="p-2 text-cs-text-secondary hover:text-white rounded-xl hover:bg-cs-bg transition-colors cursor-pointer"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-cs-border px-6 bg-cs-bg/30 shrink-0">
+        <div className="flex overflow-x-auto border-b border-cs-border px-4 bg-cs-bg/30 shrink-0">
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all relative border-b-2",
+                'flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all relative border-b-2 whitespace-nowrap cursor-pointer',
                 activeTab === tab.id
-                  ? "border-cs-primary text-cs-primary"
-                  : "border-transparent text-cs-text-secondary hover:text-white"
+                  ? 'border-cs-primary text-cs-primary'
+                  : 'border-transparent text-cs-text-secondary hover:text-white'
               )}
             >
-              <tab.icon size={16} />
+              <tab.icon size={15} />
               {tab.label}
             </button>
           ))}
@@ -113,14 +153,13 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   value={form.name}
                   onChange={(e) => setField('name', e.target.value)}
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                  placeholder="Ex: Dubola Molhos Especiais"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">CNPJ / CPF</label>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">CNPJ / CPF / CRM</label>
                   <input
                     type="text"
                     value={form.document_id}
@@ -130,21 +169,18 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Cor Identidade (Hex)</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="color"
-                      value={form.brand_color}
-                      onChange={(e) => setField('brand_color', e.target.value)}
-                      className="w-10 h-10 rounded-xl bg-transparent border border-cs-border cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={form.brand_color}
-                      onChange={(e) => setField('brand_color', e.target.value)}
-                      className="flex-1 bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary font-mono uppercase"
-                    />
-                  </div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Estágio do Ciclo</label>
+                  <select
+                    value={form.lifecycle_stage}
+                    onChange={(e) => setField('lifecycle_stage', e.target.value)}
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                  >
+                    <option value="onboarding">Onboarding / Setup</option>
+                    <option value="estrategia">Estratégia & Planejamento</option>
+                    <option value="producao">Produção Ativa</option>
+                    <option value="performance">Escala & Performance</option>
+                    <option value="retencao">Retenção / Renovação</option>
+                  </select>
                 </div>
               </div>
 
@@ -158,7 +194,6 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                       value={form.contact_name}
                       onChange={(e) => setField('contact_name', e.target.value)}
                       className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                      placeholder="Ex: Roberto Silva"
                     />
                   </div>
                   <div>
@@ -168,7 +203,6 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                       value={form.contact_email}
                       onChange={(e) => setField('contact_email', e.target.value)}
                       className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                      placeholder="contato@cliente.com"
                     />
                   </div>
                   <div>
@@ -178,7 +212,6 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                       value={form.contact_phone}
                       onChange={(e) => setField('contact_phone', e.target.value)}
                       className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                      placeholder="(11) 99999-9999"
                     />
                   </div>
                 </div>
@@ -186,17 +219,93 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
             </div>
           )}
 
+          {activeTab === 'marca' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { key: 'primary_color', label: 'Cor Primária' },
+                  { key: 'secondary_color', label: 'Cor Secundária' },
+                  { key: 'accent_color', label: 'Cor de Destaque' },
+                ].map(item => (
+                  <div key={item.key} className="bg-cs-bg border border-cs-border rounded-2xl p-3 space-y-2">
+                    <label className="text-[10px] font-bold text-cs-text-secondary uppercase block">{item.label}</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={normalizeHexColor(form[item.key], '#3b82f6')}
+                        onChange={(e) => setField(item.key, e.target.value)}
+                        className="w-10 h-10 rounded-xl bg-transparent border border-cs-border cursor-pointer shrink-0"
+                      />
+                      <input
+                        type="text"
+                        value={form[item.key]}
+                        onChange={(e) => setField(item.key, e.target.value)}
+                        className="w-full bg-cs-surface border border-cs-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cs-primary font-mono uppercase"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Tipografia Oficial</label>
+                  <input
+                    type="text"
+                    value={form.typography}
+                    onChange={(e) => setField('typography', e.target.value)}
+                    placeholder="Ex: Montserrat + Inter"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">URL do Logotipo</label>
+                  <input
+                    type="url"
+                    value={form.logo_url}
+                    onChange={(e) => setField('logo_url', e.target.value)}
+                    placeholder="https://..."
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Palavras-Chave da Marca (separadas por vírgula)</label>
+                <input
+                  type="text"
+                  value={form.keywordsText}
+                  onChange={(e) => setField('keywordsText', e.target.value)}
+                  placeholder="Ex: Cirurgia Vascular, Laser Transdérmico, Poços de Caldas"
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                />
+              </div>
+            </div>
+          )}
+
           {activeTab === 'financeiro' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Fee Mensal (R$)</label>
                   <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     value={form.monthly_fee}
                     onChange={(e) => setField('monthly_fee', e.target.value)}
                     className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-cs-primary"
-                    placeholder="3500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Horas Contratadas / Mês</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    value={form.monthly_hours_contracted}
+                    onChange={(e) => setField('monthly_hours_contracted', e.target.value)}
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-cs-primary"
                   />
                 </div>
                 <div>
@@ -233,7 +342,6 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
                 >
                   <option value="active">Ativo (Em Operação)</option>
-                  <option value="pending">Pendente (Onboarding)</option>
                   <option value="inactive">Inativo (Pausado / Encerrado)</option>
                 </select>
               </div>
@@ -253,9 +361,29 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
                   placeholder="https://drive.google.com/drive/folders/..."
                 />
-                <p className="text-[10px] text-cs-text-secondary mt-1">
-                  Insira o link compartilhado do Google Drive para armazenar artes, vídeos, contratos e relatórios deste cliente.
-                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Instagram (@)</label>
+                  <input
+                    type="text"
+                    value={form.instagram}
+                    onChange={(e) => setField('instagram', e.target.value)}
+                    placeholder="@empresa"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Website</label>
+                  <input
+                    type="url"
+                    value={form.website}
+                    onChange={(e) => setField('website', e.target.value)}
+                    placeholder="https://..."
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                  />
+                </div>
               </div>
 
               <div>
@@ -267,14 +395,11 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   value={form.reportei_url || form.reportei_config?.project_id || ''}
                   onChange={(e) => {
                     setField('reportei_url', e.target.value);
-                    setField('reportei_config', { project_id: e.target.value });
+                    setField('reportei_config', { ...form.reportei_config, project_id: e.target.value });
                   }}
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                  placeholder="Ex: 987654 (ID do Projeto no Reportei)"
+                  placeholder="Ex: 987654"
                 />
-                <p className="text-[10px] text-cs-text-secondary mt-1">
-                  Utilizado para integrar métricas ao vivo de Meta Ads, Google Ads e Instagram no Dashboard do cliente.
-                </p>
               </div>
             </div>
           )}
@@ -288,7 +413,6 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   value={form.tone_of_voice}
                   onChange={(e) => setField('tone_of_voice', e.target.value)}
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                  placeholder="Ex: Sofisticado, Técnico, Educativo, Descontraído"
                 />
               </div>
 
@@ -299,18 +423,37 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
                   value={form.target_audience}
                   onChange={(e) => setField('target_audience', e.target.value)}
                   className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
-                  placeholder="Ex: Empresários B2B de médio porte, 30 a 55 anos"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Instruções Customizadas para a IA</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Proposta de Valor / Diferenciais</label>
+                <input
+                  type="text"
+                  value={form.value_proposition}
+                  onChange={(e) => setField('value_proposition', e.target.value)}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Objetivos Estratégicos</label>
+                <input
+                  type="text"
+                  value={form.strategic_goals}
+                  onChange={(e) => setField('strategic_goals', e.target.value)}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Instruções Customizadas & Compliance (IA)</label>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={form.ai_instructions}
                   onChange={(e) => setField('ai_instructions', e.target.value)}
                   className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Especifique palavras proibidas, diretrizes rígidas de marca ou regras de copywriting para a IA aplicar neste cliente..."
+                  placeholder="Regras de conselho profissional, palavras proibidas e diretrizes de copywriting..."
                 />
               </div>
             </div>
@@ -320,15 +463,16 @@ export default function ClientConfigModal({ client, onClose, onSave }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 rounded-xl border border-cs-border text-cs-text-secondary hover:text-white transition-colors text-xs font-bold"
+              className="px-5 py-2.5 rounded-xl border border-cs-border text-cs-text-secondary hover:text-white transition-colors text-xs font-bold cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-2.5 rounded-xl font-bold text-xs transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-2"
+              disabled={saving}
+              className="bg-cs-primary hover:bg-cs-primary-hover text-black px-6 py-2.5 rounded-xl font-extrabold text-xs transition-all shadow-lg shadow-cs-primary/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Save size={16} /> Salvar Alterações
+              <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Alterações'}
             </button>
           </div>
         </form>

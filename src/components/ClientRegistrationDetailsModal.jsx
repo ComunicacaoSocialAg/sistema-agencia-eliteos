@@ -1,34 +1,33 @@
 import React, { useState } from 'react';
-import { 
-  X, 
-  Copy, 
-  Check, 
-  Building2, 
-  UserCheck, 
-  MapPin, 
-  CreditCard, 
-  Send, 
-  CheckCircle2, 
-  Clock, 
-  Trash2, 
+import {
+  X,
+  Copy,
+  Check,
+  Building2,
+  UserCheck,
+  MapPin,
+  CreditCard,
+  Send,
+  Trash2,
   FileCheck,
-  Globe,
   Phone,
-  Mail
+  Mail,
+  Palette
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { normalizeHexColor } from '../lib/brandKit';
 
-function InstagramIcon({ size = 14, className = "" }) {
+function InstagramIcon({ size = 14, className = '' }) {
   return (
-    <svg 
-      width={size} 
-      height={size} 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={className}
     >
       <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
@@ -38,16 +37,20 @@ function InstagramIcon({ size = 14, className = "" }) {
   );
 }
 
-export default function ClientRegistrationDetailsModal({ 
-  registration, 
-  isOpen, 
-  onClose, 
-  onUpdateStatus, 
-  onDelete, 
-  onCreateClient 
+export default function ClientRegistrationDetailsModal({
+  registration,
+  isOpen,
+  onClose,
+  onUpdateStatus,
+  onDelete,
+  onCreateClient
 }) {
+  const raw = registration?.raw_data || {};
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [monthlyFee, setMonthlyFee] = useState(() => (raw.deal_value ? String(raw.deal_value) : ''));
+  const [primaryColor, setPrimaryColor] = useState(() => raw.primary_color || '#3b82f6');
+  const [openOnboardingAfter, setOpenOnboardingAfter] = useState(true);
 
   if (!isOpen || !registration) return null;
 
@@ -75,6 +78,7 @@ Cidade/UF: ${registration.city || 'Poços de Caldas'} / ${registration.state || 
 CEP: ${registration.cep || ''}
 
 FATURAMENTO & OPERAÇÃO:
+Fee Mensal: ${monthlyFee ? `R$ ${monthlyFee}` : 'A definir'}
 Dia de Vencimento: Dia ${registration.billing_day || '10'}
 E-mail Financeiro: ${registration.billing_email || registration.contact_email || ''}
 Instagram: ${registration.instagram_handle || 'Não informado'}
@@ -86,7 +90,7 @@ Observações: ${registration.observations || 'Nenhuma'}`;
     const text = generateContractText();
     navigator.clipboard.writeText(text);
     setCopiedSummary(true);
-    toast.success('Dados completos copiados para colar no contrato!');
+    toast.success('Dados completos copiados para colar no contrato.');
     setTimeout(() => setCopiedSummary(false), 2000);
   };
 
@@ -94,9 +98,14 @@ Observações: ${registration.observations || 'Nenhuma'}`;
     if (!onCreateClient) return;
     setConverting(true);
     try {
-      if (!await onCreateClient(registration)) return;
+      const created = await onCreateClient(registration, {
+        monthly_fee: monthlyFee === '' ? (raw.deal_value || 0) : Number(monthlyFee) || 0,
+        primary_color: normalizeHexColor(primaryColor, '#3b82f6'),
+        openOnboarding: openOnboardingAfter,
+      });
+      if (!created) return;
       if (onUpdateStatus && !await onUpdateStatus(registration.id, 'convertido')) return;
-      toast.success('Cliente oficial criado e cadastrado com sucesso!');
+      toast.success('Cliente oficial vinculado ao sistema.');
       onClose();
     } catch (err) {
       console.error(err);
@@ -113,6 +122,8 @@ Observações: ${registration.observations || 'Nenhuma'}`;
     window.open(`https://wa.me/${number}?text=${msg}`, '_blank');
   };
 
+  const hasBrandExtras = raw.drive_url || raw.logo_url || raw.primary_color || raw.secondary_color || raw.accent_color || raw.typography || raw.tone_of_voice || raw.target_audience;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
       <div className="w-full max-w-2xl bg-cs-surface border border-cs-border rounded-3xl p-6 sm:p-8 shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -124,8 +135,8 @@ Observações: ${registration.observations || 'Nenhuma'}`;
                 registration.status === 'convertido'
                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                   : registration.status === 'aprovado'
-                  ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
-                  : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30'
+                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                    : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30'
               }`}>
                 {registration.status === 'convertido' ? 'Cliente Convertido' : registration.status === 'aprovado' ? 'Aprovado' : 'Aguardando Revisão'}
               </span>
@@ -144,6 +155,7 @@ Observações: ${registration.observations || 'Nenhuma'}`;
           </div>
 
           <button
+            type="button"
             onClick={onClose}
             className="text-cs-text-secondary hover:text-white transition-colors p-1 rounded-lg hover:bg-white/5 cursor-pointer"
           >
@@ -152,7 +164,7 @@ Observações: ${registration.observations || 'Nenhuma'}`;
         </div>
 
         {/* Content body */}
-        <div className="flex-1 overflow-y-auto py-5 space-y-6 custom-scrollbar pr-1">
+        <div className="flex-1 overflow-y-auto py-5 space-y-5 custom-scrollbar pr-1">
           {/* 1. Empresa */}
           <div className="bg-cs-bg/60 border border-cs-border rounded-2xl p-4 space-y-2.5">
             <div className="flex items-center gap-2 text-xs font-bold text-cs-primary uppercase tracking-wider">
@@ -272,12 +284,92 @@ Observações: ${registration.observations || 'Nenhuma'}`;
               )}
             </div>
           </div>
+
+          {/* 5. Identidade Visual enviada */}
+          {hasBrandExtras && (
+            <div className="bg-cs-bg/60 border border-cs-border rounded-2xl p-4 space-y-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-cs-primary uppercase tracking-wider">
+                <Palette size={14} /> Identidade Visual Enviada pelo Cliente
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {(raw.primary_color || raw.secondary_color || raw.accent_color) && (
+                  <div className="sm:col-span-2 flex flex-wrap gap-3">
+                    {[
+                      { label: 'Primária', hex: raw.primary_color },
+                      { label: 'Secundária', hex: raw.secondary_color },
+                      { label: 'Destaque', hex: raw.accent_color },
+                    ].filter(c => c.hex).map(c => (
+                      <div key={c.label} className="flex items-center gap-2 bg-cs-surface px-3 py-1.5 rounded-xl border border-cs-border">
+                        <span className="w-4 h-4 rounded-full border border-white/20" style={{ backgroundColor: c.hex }} />
+                        <span className="text-white font-semibold">{c.label}:</span>
+                        <span className="font-mono text-cs-text-secondary">{c.hex}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {raw.typography && <div><span className="text-cs-text-secondary block text-[11px]">Tipografia:</span><span className="text-white">{raw.typography}</span></div>}
+                {raw.tone_of_voice && <div><span className="text-cs-text-secondary block text-[11px]">Tom de Voz:</span><span className="text-white">{raw.tone_of_voice}</span></div>}
+                {raw.drive_url && <div className="sm:col-span-2"><span className="text-cs-text-secondary block text-[11px]">Drive / Materiais:</span><a href={raw.drive_url} target="_blank" rel="noreferrer" className="text-cs-primary hover:underline break-all">{raw.drive_url}</a></div>}
+                {raw.target_audience && <div className="sm:col-span-2"><span className="text-cs-text-secondary block text-[11px]">Público-alvo:</span><span className="text-white">{raw.target_audience}</span></div>}
+              </div>
+            </div>
+          )}
+
+          {/* Parâmetros de ativação comercial */}
+          {registration.status !== 'convertido' && onCreateClient && (
+            <div className="bg-cs-primary/5 border border-cs-primary/20 rounded-2xl p-4 space-y-3">
+              <div className="text-xs font-bold text-cs-primary uppercase tracking-wider">
+                Configuração ao Ativar Conta Oficial
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-cs-text-secondary block mb-1">Fee Mensal Acordado (R$)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={monthlyFee}
+                    onChange={(e) => setMonthlyFee(e.target.value)}
+                    placeholder="Ex: 3500"
+                    className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cs-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-cs-text-secondary block mb-1">Cor Principal da Marca (HEX)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={normalizeHexColor(primaryColor, '#3b82f6')}
+                      onChange={(e) => setPrimaryColor(e.target.value)}
+                      className="w-9 h-9 rounded-lg bg-transparent border border-cs-border cursor-pointer shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={primaryColor}
+                      onChange={(e) => setPrimaryColor(e.target.value)}
+                      className="w-full bg-cs-bg border border-cs-border rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:outline-none focus:border-cs-primary"
+                    />
+                  </div>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-cs-text-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={openOnboardingAfter}
+                  onChange={(e) => setOpenOnboardingAfter(e.target.checked)}
+                  className="accent-cs-primary"
+                />
+                Abrir Hub de Onboarding e Brand Kit logo após criar o cliente
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}
         <div className="pt-4 border-t border-cs-border flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleCopyContractData}
               className="bg-cs-bg hover:bg-white/5 border border-cs-border hover:border-cs-primary/50 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
               title="Copiar texto pronto para a minuta do contrato"
@@ -288,9 +380,9 @@ Observações: ${registration.observations || 'Nenhuma'}`;
 
             {registration.contact_phone && (
               <button
+                type="button"
                 onClick={handleOpenWhatsApp}
                 className="bg-[#25D366]/10 hover:bg-[#25D366]/20 border border-[#25D366]/30 text-[#25D366] px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Conversar no WhatsApp"
               >
                 <Send size={13} />
                 <span>WhatsApp</span>
@@ -299,12 +391,13 @@ Observações: ${registration.observations || 'Nenhuma'}`;
 
             {onDelete && (
               <button
+                type="button"
                 onClick={async () => {
                   if (confirm('Deseja excluir esta ficha cadastral?')) {
                     if (await onDelete(registration.id)) onClose();
                   }
                 }}
-                className="text-red-400 hover:text-red-300 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors"
+                className="text-red-400 hover:text-red-300 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors cursor-pointer"
                 title="Excluir cadastro"
               >
                 <Trash2 size={16} />
@@ -315,6 +408,7 @@ Observações: ${registration.observations || 'Nenhuma'}`;
           <div className="flex items-center gap-2">
             {registration.status !== 'convertido' && onCreateClient && (
               <button
+                type="button"
                 onClick={handleConvertToClient}
                 disabled={converting}
                 className="bg-cs-primary hover:bg-cs-primary-hover text-black font-extrabold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-cs-primary/10 disabled:opacity-50"

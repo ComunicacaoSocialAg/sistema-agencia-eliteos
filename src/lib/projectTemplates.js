@@ -1,5 +1,5 @@
 // src/lib/projectTemplates.js
-// Templates editáveis de projetos — cada template define um guia de tarefas
+// Templates editáveis de projetos: cada template define um guia de tarefas
 // que pode ser personalizado antes de ser disparado no Kanban.
 
 export const PROJECT_TYPES = [
@@ -23,10 +23,10 @@ export const PROJECT_TEMPLATES = {
     tasks: [
       { title: 'Briefing de Conteúdo', description: 'Reunião para definir pautas, tom de voz e objetivos do mês.', day: 0, tag: 'Social Media', estimated_hours: 2, status: 'backlog' },
       { title: 'Calendário Editorial', description: 'Montar grade completa de conteúdo do mês com temas e formatos.', day: 2, tag: 'Social Media', estimated_hours: 3, status: 'backlog' },
-      { title: 'Produção de Artes — Semana 1', description: 'Criar peças visuais da primeira semana conforme calendário aprovado.', day: 5, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
-      { title: 'Produção de Artes — Semana 2', description: 'Criar peças visuais da segunda semana.', day: 10, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
-      { title: 'Produção de Artes — Semana 3', description: 'Criar peças visuais da terceira semana.', day: 17, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
-      { title: 'Produção de Artes — Semana 4', description: 'Criar peças visuais da quarta semana.', day: 22, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
+      { title: 'Produção de Artes: Semana 1', description: 'Criar peças visuais da primeira semana conforme calendário aprovado.', day: 5, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
+      { title: 'Produção de Artes: Semana 2', description: 'Criar peças visuais da segunda semana.', day: 10, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
+      { title: 'Produção de Artes: Semana 3', description: 'Criar peças visuais da terceira semana.', day: 17, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
+      { title: 'Produção de Artes: Semana 4', description: 'Criar peças visuais da quarta semana.', day: 22, tag: 'Social Media', estimated_hours: 8, status: 'backlog' },
       { title: 'Relatório Mensal de Performance', description: 'Compilar métricas e entregar relatório ao cliente.', day: 30, tag: 'Social Media', estimated_hours: 4, status: 'backlog' },
     ],
   },
@@ -38,7 +38,7 @@ export const PROJECT_TEMPLATES = {
     tasks: [
       { title: 'Briefing de Marca', description: 'Entrevista profunda: valores, missão, público, concorrência e referências.', day: 0, tag: 'Branding', estimated_hours: 3, status: 'backlog' },
       { title: 'Pesquisa e Moodboard', description: 'Análise de mercado, tendências e compilação de referências visuais.', day: 2, tag: 'Branding', estimated_hours: 6, status: 'backlog' },
-      { title: 'Exploração de Logo — 3 Conceitos', description: 'Apresentar 3 direções distintas de identidade para o cliente escolher.', day: 7, tag: 'Branding', estimated_hours: 16, status: 'backlog' },
+      { title: 'Exploração de Logo: 3 Conceitos', description: 'Apresentar 3 direções distintas de identidade para o cliente escolher.', day: 7, tag: 'Branding', estimated_hours: 16, status: 'backlog' },
       { title: 'Refinamento do Conceito Escolhido', description: 'Desenvolver e refinar o conceito aprovado com variações.', day: 12, tag: 'Branding', estimated_hours: 10, status: 'backlog' },
       { title: 'Manual da Marca (Brandbook)', description: 'Documentar cores, tipografia, usos corretos e incorretos da marca.', day: 16, tag: 'Branding', estimated_hours: 12, status: 'backlog' },
       { title: 'Entrega Final dos Arquivos', description: 'Organizar e entregar todos os arquivos nos formatos solicitados.', day: 21, tag: 'Branding', estimated_hours: 3, status: 'backlog' },
@@ -69,7 +69,7 @@ export const PROJECT_TEMPLATES = {
       { title: 'Briefing Criativo', description: 'Definir roteiro, tom, locações, elenco e equipamentos necessários.', day: 0, tag: 'Vídeo', estimated_hours: 3, status: 'backlog' },
       { title: 'Desenvolvimento do Roteiro', description: 'Escrever roteiro completo e aprovado pelo cliente.', day: 3, tag: 'Vídeo', estimated_hours: 8, status: 'backlog' },
       { title: 'Produção (Gravação)', description: 'Dia(s) de gravação conforme roteiro aprovado.', day: 8, tag: 'Vídeo', estimated_hours: 12, status: 'backlog' },
-      { title: 'Edição — Corte Rough', description: 'Primeiro corte para aprovação de estrutura e ritmo.', day: 12, tag: 'Vídeo', estimated_hours: 10, status: 'backlog' },
+      { title: 'Edição: Corte Rough', description: 'Primeiro corte para aprovação de estrutura e ritmo.', day: 12, tag: 'Vídeo', estimated_hours: 10, status: 'backlog' },
       { title: 'Edição Final (Color + Motion)', description: 'Finalização com color grading, motion graphics e trilha.', day: 16, tag: 'Vídeo', estimated_hours: 8, status: 'backlog' },
       { title: 'Entrega e Exportação', description: 'Exportar nos formatos e resoluções solicitados.', day: 20, tag: 'Vídeo', estimated_hours: 2, status: 'backlog' },
     ],
@@ -98,8 +98,8 @@ export const PROJECT_TEMPLATES = {
       { title: 'Planejamento de Mídia', description: 'Definir verba, públicos, objetivos e estrutura de campanhas.', day: 2, tag: 'Campanha', estimated_hours: 6, status: 'backlog' },
       { title: 'Criação dos Criativos', description: 'Produzir peças (imagens e vídeos) para os anúncios.', day: 5, tag: 'Campanha', estimated_hours: 10, status: 'backlog' },
       { title: 'Setup e Lançamento das Campanhas', description: 'Subir campanhas nas plataformas e ativar anúncios.', day: 8, tag: 'Campanha', estimated_hours: 6, status: 'backlog' },
-      { title: 'Otimização — Semana 2', description: 'Analisar dados e otimizar públicos, lances e criativos.', day: 14, tag: 'Campanha', estimated_hours: 3, status: 'backlog' },
-      { title: 'Otimização — Semana 3', description: 'Segunda rodada de otimizações e testes A/B.', day: 21, tag: 'Campanha', estimated_hours: 3, status: 'backlog' },
+      { title: 'Otimização: Semana 2', description: 'Analisar dados e otimizar públicos, lances e criativos.', day: 14, tag: 'Campanha', estimated_hours: 3, status: 'backlog' },
+      { title: 'Otimização: Semana 3', description: 'Segunda rodada de otimizações e testes A/B.', day: 21, tag: 'Campanha', estimated_hours: 3, status: 'backlog' },
       { title: 'Relatório Mensal de Mídia', description: 'Compilar resultados: CPL, CPA, ROAS e recomendações.', day: 30, tag: 'Campanha', estimated_hours: 4, status: 'backlog' },
     ],
   },

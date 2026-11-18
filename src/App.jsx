@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Briefcase, Users, DollarSign, BarChart, Settings, Bot, LogOut, Search, Bell, Sparkles, Shield, Beaker, Menu, X, ClipboardList, Palette, BarChart3, Radio, Zap } from 'lucide-react';
 import SandboxView from './views/SandboxView';
@@ -25,7 +25,7 @@ import PublicClientOnboardingView from './views/PublicClientOnboardingView';
 import BuzzMonitorView from './views/BuzzMonitorView';
 import { ActiveClientProvider, useActiveClient } from './contexts/ActiveClientContext';
 import { useRecurring } from './hooks/useRecurring';
-import { TasksProvider } from './hooks/useTasks';
+import { TasksProvider, useTasks } from './hooks/useTasks';
 import { useNotifications } from './hooks/useNotifications';
 
 // Role-based nav items
@@ -52,9 +52,11 @@ const CLIENT_NAV_ITEMS = [
 function AppShell() {
   const { profile, role, signOut, isDemoMode, switchDemoUser } = useAuth();
   const { selectedClientId, setSelectedClientId, clients } = useActiveClient();
+  const { tasks } = useTasks(undefined, { showArchived: true });
   const [searchValue, setSearchValue] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [deepLinkClient, setDeepLinkClient] = useState(null);
   const { checkAndGenerate } = useRecurring();
   const { alerts, dismiss, dismissAll } = useNotifications(role !== 'client');
 
@@ -62,12 +64,41 @@ function AppShell() {
 
   const [activeView, setActiveView] = useState(() => {
     try {
+      const fromUrl = new URLSearchParams(window.location.search).get('view');
+      if (fromUrl) return fromUrl;
       const saved = localStorage.getItem('csag_active_view');
       return saved || (effectiveRole === 'client' ? 'hub' : 'direcao');
     } catch {
       return effectiveRole === 'client' ? 'hub' : 'direcao';
     }
   });
+
+  const navigateToView = useCallback((viewId, { clientId = null, clientTab = 'overview' } = {}) => {
+    setActiveView(viewId);
+    if (clientId) {
+      setSelectedClientId(clientId);
+      setDeepLinkClient(viewId === 'clientes' ? { id: clientId, tab: clientTab } : null);
+    } else if (viewId !== 'clientes') {
+      setDeepLinkClient(null);
+    }
+    try {
+      localStorage.setItem('csag_active_view', viewId);
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', viewId);
+      window.history.replaceState(window.history.state, '', url);
+    } catch {
+      // ignore
+    }
+  }, [setSelectedClientId]);
+
+  useEffect(() => {
+    const handleCustomNav = (event) => {
+      const { view, clientId, clientTab } = event.detail || {};
+      if (view) navigateToView(view, { clientId, clientTab });
+    };
+    window.addEventListener('csag:navigate', handleCustomNav);
+    return () => window.removeEventListener('csag:navigate', handleCustomNav);
+  }, [navigateToView]);
 
   useEffect(() => {
     if (effectiveRole !== 'client') {
@@ -82,8 +113,22 @@ function AppShell() {
   const query = searchValue.trim().toLocaleLowerCase('pt-BR');
   const matchingViews = query ? navItems.filter(item =>
     `${item.label} ${item.desc}`.toLocaleLowerCase('pt-BR').includes(query)) : [];
+  const matchingClients = query ? clients.filter(c =>
+    `${c.name} ${c.contact_name || ''} ${c.document_id || ''}`.toLocaleLowerCase('pt-BR').includes(query)).slice(0, 5) : [];
+  const matchingTasks = query ? (tasks || []).filter(t =>
+    `${t.title} ${t.client_name || ''}`.toLocaleLowerCase('pt-BR').includes(query)).slice(0, 5) : [];
+
   const openSearchResult = item => {
-    setActiveView(item.id);
+    navigateToView(item.id);
+    setSearchValue('');
+  };
+  const openClientSearchResult = client => {
+    navigateToView('clientes', { clientId: client.id, clientTab: 'overview' });
+    setSearchValue('');
+  };
+  const openTaskSearchResult = task => {
+    if (task.client_id) setSelectedClientId(task.client_id);
+    navigateToView('producao');
     setSearchValue('');
   };
 
@@ -132,12 +177,7 @@ function AppShell() {
               <button
                 key={item.id}
                 onClick={() => {
-                  setActiveView(item.id);
-                  try {
-                    localStorage.setItem('csag_active_view', item.id);
-                  } catch {
-                    // ignore
-                  }
+                  navigateToView(item.id);
                   setIsMobileMenuOpen(false);
                 }}
                 className={cn(
@@ -186,24 +226,25 @@ function AppShell() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden bg-cs-bg min-w-0 w-full relative">
         {/* Header */}
-        <header className="h-16 border-b border-cs-border bg-cs-bg/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <button className="md:hidden text-cs-text-secondary hover:text-white" onClick={() => setIsMobileMenuOpen(true)}>
+        <header className="h-16 border-b border-cs-border bg-cs-bg/80 backdrop-blur-md flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 z-10 shrink-0 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 overflow-hidden">
+            <button className="md:hidden text-cs-text-secondary hover:text-white shrink-0" aria-label="Abrir menu" onClick={() => setIsMobileMenuOpen(true)}>
               <Menu size={20} />
             </button>
-            <h1 className="text-lg font-bold text-white truncate">
+            <h1 className="text-base sm:text-lg font-bold text-white truncate min-w-0">
               {navItems.find(i => i.id === validView)?.label || 'Visão Geral'}
             </h1>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink min-w-0">
             {/* Seletor Global de Cliente Ativo */}
             {effectiveRole !== 'client' && (
-              <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
-                <span className="text-[10px] text-cs-primary font-bold uppercase tracking-wider hidden lg:inline">Cliente em Foco:</span>
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-cs-surface border border-cs-border px-2 sm:px-3 py-1.5 rounded-xl text-xs shadow-sm min-w-0">
+                <span className="text-[10px] text-cs-primary font-bold uppercase tracking-wider hidden 2xl:inline shrink-0">Cliente em Foco:</span>
                 <select
+                  aria-label="Cliente em Foco"
                   value={selectedClientId}
                   onChange={(e) => setSelectedClientId(e.target.value)}
-                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer max-w-[210px] truncate"
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer max-w-[125px] sm:max-w-[165px] xl:max-w-[190px] truncate"
                 >
                   <option value="all" className="bg-cs-bg text-white">🏢 Todos os Clientes (Visão Geral)</option>
                   {clients.map(c => (
@@ -216,16 +257,17 @@ function AppShell() {
             )}
 
             {/* Persona Switcher for effortless Multi-role testing */}
-            {isDemoMode && <div className="flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm">
-              <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider hidden lg:inline">Alternar Perfil:</span>
+            {isDemoMode && <div className="hidden lg:flex items-center gap-2 bg-cs-surface border border-cs-border px-3 py-1.5 rounded-xl text-xs shadow-sm min-w-0">
+              <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider hidden 2xl:inline shrink-0">Alternar Perfil:</span>
               <select
+                aria-label="Alternar Perfil"
                 value={profile?.email || 'admin@csag.com'}
                 onChange={(e) => {
                   const u = switchDemoUser(e.target.value);
                   if (u?.role === 'client') setActiveView('hub');
                   else if (activeView === 'hub') setActiveView('dashboard');
                 }}
-                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer max-w-[155px] xl:max-w-[190px] truncate"
               >
                 <option value="admin@csag.com" className="bg-cs-bg text-white">👑 Bruno (Agência : Operador Geral)</option>
                 <option value="cliente@dubola.com.br" className="bg-cs-bg text-white">🥫 Roberto (Cliente : Dubola Molhos)</option>
@@ -242,17 +284,56 @@ function AppShell() {
                 aria-label="Buscar módulo"
                 onKeyDown={event => {
                   if (event.key === 'Escape') setSearchValue('');
-                  if (event.key === 'Enter' && matchingViews.length) openSearchResult(matchingViews[0]);
+                  if (event.key === 'Enter') {
+                    if (matchingClients.length) openClientSearchResult(matchingClients[0]);
+                    else if (matchingViews.length) openSearchResult(matchingViews[0]);
+                    else if (matchingTasks.length) openTaskSearchResult(matchingTasks[0]);
+                  }
                 }}
-                placeholder="Buscar módulo..."
-                className="bg-cs-surface border border-cs-border rounded-full pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-cs-primary focus:ring-1 focus:ring-cs-primary transition-all w-48 text-white placeholder:text-cs-text-secondary"
+                placeholder="Buscar cliente, tarefa ou módulo..."
+                className="bg-cs-surface border border-cs-border rounded-full pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-cs-primary focus:ring-1 focus:ring-cs-primary transition-all w-40 xl:w-56 text-white placeholder:text-cs-text-secondary"
               />
               {query && (
-                <ul className="absolute right-0 top-full mt-2 w-64 bg-cs-surface border border-cs-border rounded-xl p-2 z-50">
-                  {matchingViews.length ? matchingViews.map(item => (
-                    <li key={item.id}><button type="button" onClick={() => openSearchResult(item)}
-                      className="w-full text-left px-3 py-2 text-xs rounded hover:bg-cs-bg">{item.label}</button></li>
-                  )) : <li className="px-3 py-2 text-xs text-cs-text-secondary">Nenhum módulo encontrado</li>}
+                <ul className="absolute right-0 top-full mt-2 w-80 bg-cs-surface border border-cs-border rounded-xl p-2 z-50 shadow-2xl space-y-1 max-h-96 overflow-y-auto custom-scrollbar">
+                  {matchingClients.length > 0 && (
+                    <li className="px-2 pt-1 text-[10px] font-bold uppercase text-cs-text-secondary">Clientes</li>
+                  )}
+                  {matchingClients.map(client => (
+                    <li key={client.id}>
+                      <button type="button" onClick={() => openClientSearchResult(client)}
+                        className="w-full text-left px-3 py-2 text-xs rounded hover:bg-cs-bg flex items-center justify-between gap-2 cursor-pointer">
+                        <span className="font-semibold text-white truncate">{client.name}</span>
+                        <span className="text-[10px] text-cs-primary shrink-0">Conta</span>
+                      </button>
+                    </li>
+                  ))}
+                  {matchingTasks.length > 0 && (
+                    <li className="px-2 pt-1 text-[10px] font-bold uppercase text-cs-text-secondary">Tarefas</li>
+                  )}
+                  {matchingTasks.map(task => (
+                    <li key={task.id}>
+                      <button type="button" onClick={() => openTaskSearchResult(task)}
+                        className="w-full text-left px-3 py-2 text-xs rounded hover:bg-cs-bg flex items-center justify-between gap-2 cursor-pointer">
+                        <span className="text-white truncate">{task.title}</span>
+                        <span className="text-[10px] text-cs-text-secondary shrink-0">Produção</span>
+                      </button>
+                    </li>
+                  ))}
+                  {matchingViews.length > 0 && (
+                    <li className="px-2 pt-1 text-[10px] font-bold uppercase text-cs-text-secondary">Módulos</li>
+                  )}
+                  {matchingViews.map(item => (
+                    <li key={item.id}>
+                      <button type="button" onClick={() => openSearchResult(item)}
+                        className="w-full text-left px-3 py-2 text-xs rounded hover:bg-cs-bg flex items-center justify-between gap-2 cursor-pointer">
+                        <span className="text-white">{item.label}</span>
+                        <span className="text-[10px] text-cs-text-secondary">Módulo</span>
+                      </button>
+                    </li>
+                  ))}
+                  {matchingClients.length === 0 && matchingTasks.length === 0 && matchingViews.length === 0 && (
+                    <li className="px-3 py-2 text-xs text-cs-text-secondary">Nenhum resultado encontrado</li>
+                  )}
                 </ul>
               )}
             </div>}
@@ -270,7 +351,7 @@ function AppShell() {
                 )}
               </button>
               {showNotifications && (
-                <div className="absolute right-0 top-12 w-96 bg-cs-surface border border-cs-border rounded-2xl shadow-2xl z-50 overflow-hidden">
+                <div className="absolute right-0 top-12 w-[min(24rem,calc(100vw-2rem))] bg-cs-surface border border-cs-border rounded-2xl shadow-2xl z-50 overflow-hidden">
                   <div className="p-4 border-b border-cs-border flex items-center justify-between">
                     <h3 className="text-sm font-bold text-white">Notificações</h3>
                     {alerts.length > 0 && (
@@ -283,12 +364,22 @@ function AppShell() {
                     ) : (
                       alerts.map(alert => (
                         <div key={alert.id} className="p-4 border-b border-cs-border/50 hover:bg-white/[0.02] transition-colors flex items-start gap-3">
-                          <span className="text-lg">{alert.icon}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-white">{alert.title}</p>
-                            <p className="text-[11px] text-cs-text-secondary mt-0.5 truncate">{alert.message}</p>
-                          </div>
-                          <button onClick={() => dismiss(alert.id)} className="text-cs-text-secondary hover:text-white text-xs p-1">✕</button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (alert.clientId) setSelectedClientId(alert.clientId);
+                              if (alert.targetView) setActiveView(alert.targetView);
+                              setShowNotifications(false);
+                            }}
+                            className="flex-1 min-w-0 flex items-start gap-3 text-left cursor-pointer"
+                          >
+                            <span className="text-lg shrink-0">{alert.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-white">{alert.title}</p>
+                              <p className="text-[11px] text-cs-text-secondary mt-0.5 truncate">{alert.message}</p>
+                            </div>
+                          </button>
+                          <button type="button" aria-label="Dispensar alerta" onClick={() => dismiss(alert.id)} className="text-cs-text-secondary hover:text-white text-xs p-1 cursor-pointer">✕</button>
                         </div>
                       ))
                     )}
@@ -299,12 +390,18 @@ function AppShell() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-x-auto overflow-y-hidden">
+        <div className="flex-1 overflow-hidden min-w-0">
           <ViewErrorBoundary viewKey={validView}>
             {validView === 'direcao' && <FocusActionView />}
             {validView === 'dashboard' && <DashboardView />}
             {validView === 'buzzmonitor' && <BuzzMonitorView />}
-            {validView === 'clientes' && <ClientsView />}
+            {validView === 'clientes' && (
+              <ClientsView
+                initialClientId={deepLinkClient?.id || null}
+                initialClientTab={deepLinkClient?.tab || 'overview'}
+                onClearDeepLink={() => setDeepLinkClient(null)}
+              />
+            )}
             {validView === 'brandcenter' && <BrandCenterView />}
             {validView === 'producao' && <ProductionView />}
             {validView === 'crm' && <CRMView />}

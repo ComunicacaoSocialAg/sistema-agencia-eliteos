@@ -306,7 +306,7 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {
     // Sem AuthProvider por perto: não há motivo para conceder admin por
-    // padrão. Retorna estado "deslogado" — mesmo padrão fail-closed do
+    // padrão. Retorna estado "deslogado": mesmo padrão fail-closed do
     // resto do arquivo.
     return {
       user: null,

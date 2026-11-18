@@ -30,8 +30,7 @@ const STATUS_LABELS = {
   'revisao-interna': 'Revisão',
   'aguardando-cliente': 'Cliente',
   'ajustes': 'Ajustes',
-  'concluido': 'Concluído',
-  'finalizado': 'Concluído'
+  'concluido': 'Concluído'
 };
 
 const STATUS_COLORS = {
@@ -41,8 +40,7 @@ const STATUS_COLORS = {
   'revisao-interna': 'bg-orange-500',
   'aguardando-cliente': 'bg-yellow-500',
   'ajustes': 'bg-red-500',
-  'concluido': 'bg-green-500',
-  'finalizado': 'bg-green-500'
+  'concluido': 'bg-green-500'
 };
 
 import { useProfitability } from '../hooks/useProfitability';
@@ -75,14 +73,18 @@ export default function ManagementView() {
     return dist;
   }, [tasks]);
 
-  // 3. Profitability (Agency Global) - Using real hook data
+  // 3. Profitability & Real Completion Rate
   const stats = useMemo(() => {
-    const totalRevenue = clients.reduce((acc, c) => acc + (c.monthly_fee || 0), 0);
-    const totalProfit = profitability.reduce((acc, p) => acc + (p.profit || 0), 0);
+    const activeClients = clients.filter(c => c.status === 'active');
+    const totalRevenue = activeClients.reduce((acc, c) => acc + (Number(c.monthly_fee) || 0), 0);
+    const totalProfit = profitability.reduce((acc, p) => acc + (Number(p.profit) ?? (Number(p.revenue || 0) - Number(p.costHours || 0))), 0);
     const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+    const totalTasks = tasks.length;
+    const doneTasks = tasks.filter(t => t.status === 'concluido').length;
+    const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
-    return { totalRevenue, netProfit: totalProfit, margin };
-  }, [clients, profitability]);
+    return { totalRevenue, netProfit: totalProfit, margin, completionRate, doneTasks, totalTasks, activeCount: activeClients.length };
+  }, [clients, profitability, tasks]);
 
   async function generateAccess(person) {
     if (savingUser || !person.name || !person.email) return false;
@@ -169,26 +171,30 @@ export default function ManagementView() {
               <div className="text-2xl font-bold text-white">
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalRevenue)}
               </div>
-              <p className="text-[10px] text-cs-text-secondary mt-1">Soma de todos os contratos ativos</p>
+              <p className="text-[10px] text-cs-text-secondary mt-1">{stats.activeCount} contrato(s) ativo(s)</p>
             </div>
 
             <div className="bg-cs-surface border border-cs-border rounded-2xl p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
                 <div className="p-2 bg-purple-500/10 rounded-lg"><Activity size={18} className="text-purple-400" /></div>
-                <span className="text-xs text-cs-text-secondary font-medium">Efficiency Rate</span>
+                <span className="text-xs text-cs-text-secondary font-medium">Taxa de Conclusão</span>
               </div>
-              <div className="text-2xl font-bold text-white">88.5%</div>
-              <p className="text-[10px] text-green-400 mt-1">↑ 4% em relação ao mês anterior</p>
+              <div className="text-2xl font-bold text-white">
+                {stats.totalTasks > 0 ? `${stats.completionRate}%` : 'Sem dados'}
+              </div>
+              <p className="text-[10px] text-cs-text-secondary mt-1">
+                {stats.totalTasks > 0 ? `${stats.doneTasks} de ${stats.totalTasks} entregas concluídas` : 'Nenhuma tarefa registrada'}
+              </p>
             </div>
 
             <div className="bg-cs-surface border border-cs-border rounded-2xl p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
                 <div className="p-2 bg-green-500/10 rounded-lg"><TrendingUp size={18} className="text-green-400" /></div>
-                <span className="text-xs text-cs-text-secondary font-medium">Margem Líquida</span>
+                <span className="text-xs text-cs-text-secondary font-medium">Margem Bruta Apurada</span>
               </div>
               <div className="text-2xl font-bold text-white">{stats.margin.toFixed(1)}%</div>
               <div className="w-full bg-cs-bg h-1 rounded-full mt-2 overflow-hidden">
-                <div className="bg-green-500 h-full" style={{ width: `${stats.margin}%` }}></div>
+                <div className="bg-green-500 h-full" style={{ width: `${Math.max(0, Math.min(100, stats.margin))}%` }}></div>
               </div>
             </div>
 
@@ -261,8 +267,10 @@ export default function ManagementView() {
                       </div>
 
                       <div className="flex justify-between items-center mt-4">
-                        <span className="text-[10px] text-cs-text-secondary uppercase font-bold">Capacidade Semanal</span>
-                        <span className="text-[10px] text-white font-mono">{Math.max(40 - (member.tasksCount * 4), 0)}h livres</span>
+                        <span className="text-[10px] text-cs-text-secondary uppercase font-bold">Capacidade Semanal ({member.capacityHours || 40}h)</span>
+                        <span className="text-[10px] text-white font-mono">
+                          {Number(member.freeHours ?? Math.max((member.capacityHours || 40) - (member.estimatedHours || 0), 0)).toFixed(1)}h livres
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -280,12 +288,12 @@ export default function ManagementView() {
                 <div className="space-y-4">
                   {Object.keys(STATUS_LABELS).map(status => {
                     const count = statusDistribution[status] || 0;
-                    const percentage = (count / tasks.length) * 100;
+                    const percentage = tasks.length > 0 ? (count / tasks.length) * 100 : 0;
                     return (
                       <div key={status} className="group">
                         <div className="flex justify-between text-xs mb-1.5">
                           <span className="text-cs-text-secondary group-hover:text-white transition-colors">{STATUS_LABELS[status]}</span>
-                          <span className="text-white font-medium">{count} items</span>
+                          <span className="text-white font-medium">{count} itens</span>
                         </div>
                         <div className="w-full h-2 bg-cs-bg rounded-full overflow-hidden">
                           <div 
@@ -302,14 +310,22 @@ export default function ManagementView() {
               <div className="bg-gradient-to-br from-cs-primary/20 to-transparent border border-cs-primary/30 rounded-2xl p-6 relative overflow-hidden group">
                 <div className="relative z-10">
                   <h4 className="text-white font-bold mb-2 flex items-center gap-2">
-                    <CheckCircle2 size={18} className="text-cs-primary" /> Insights de Gestão
+                    <CheckCircle2 size={18} className="text-cs-primary" /> Diagnóstico de Fluxo
                   </h4>
                   <p className="text-sm text-cs-text-secondary leading-relaxed">
-                    {statusDistribution['aguardando-cliente'] > 3 
-                      ? "Você tem muitos itens parados no cliente. Sugerimos agendar uma reunião de alinhamento."
-                      : "O fluxo de produção está saudável. Capacidade para novos projetos detectada."}
+                    {(statusDistribution['aguardando-cliente'] || 0) > 3 
+                      ? "Há vários itens aguardando aprovação do cliente. Vale cobrar retorno pelo link de aprovação."
+                      : stats.totalTasks === 0
+                        ? "Nenhuma demanda em produção no momento. Crie projetos ou feche oportunidades no CRM."
+                        : `${statusDistribution['aguardando-cliente'] || 0} item(ns) aguardando cliente e ${(statusDistribution['ajustes'] || 0)} em ajuste.`}
                   </p>
-                  <button className="mt-4 text-xs text-cs-primary font-bold hover:underline">VER MAIS INSIGHTS</button>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('csag:navigate', { detail: { view: 'producao' } }))}
+                    className="mt-4 text-xs text-cs-primary font-bold hover:underline cursor-pointer"
+                  >
+                    ABRIR MESA DE PRODUÇÃO
+                  </button>
                 </div>
                 <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
                   <Activity size={100} className="text-cs-primary" />

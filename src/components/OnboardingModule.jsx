@@ -1,559 +1,868 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Rocket, CheckCircle2, Clock, Upload, Link2, Eye, EyeOff,
-  Copy, Trash2, Plus, FileText, Palette, Globe,
-  Shield, BookOpen, Zap, ChevronRight, Check, AlertCircle,
-  Lock, Calendar, User, Building2,
-  Target, TrendingUp, AtSign, Hash, Play, ExternalLink,
-  ArrowRight, Sparkles, RefreshCw, Send, Save
+  Rocket, CheckCircle2, FileText, Palette, Shield, Sparkles,
+  Save, Building2, DollarSign, MessageSquare, CheckSquare, Square, Calendar
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { generateContent } from '../lib/gemini';
+import { generateStrategicPlan } from '../lib/openai';
+import { operationId } from '../lib/operationId';
 import { useTasks } from '../hooks/useTasks';
+import { useInvoices } from '../hooks/useInvoices';
 import { cn } from '../utils/cn';
+import BrandKitEditor from './BrandKitEditor';
+import RegistrationLinkModal from './RegistrationLinkModal';
 
 const WORKFLOW_TASKS = [
   {
-    title: 'Disparo de Boas-Vindas',
-    description: 'Enviar e-mail e mensagem de boas-vindas para o cliente com acesso ao portal.',
+    key: 'boas-vindas',
+    title: 'Disparo de Boas-Vindas & Alinhamento',
+    description: 'Enviar mensagem de boas-vindas com orientações de aprovação e canal oficial.',
     day: 0,
-    icon: '👋',
+    tag: 'Social Media',
     priority: 'high',
-    category: 'comunicacao',
+    status: 'briefing',
   },
   {
-    title: 'Monitoramento do Hub',
-    description: 'Verificar se o cliente acessou o portal e preencheu o formulário de briefing de negócio.',
+    key: 'auditoria-marca',
+    title: 'Auditoria de Brand Kit, Logo & Drive',
+    description: 'Conferir logotipos em vetor, paleta oficial, tipografia e pasta no Google Drive.',
+    day: 2,
+    tag: 'Branding',
+    priority: 'high',
+    status: 'backlog',
+  },
+  {
+    key: 'setup-acessos',
+    title: 'Setup de Acessos (Meta, Google & Redes)',
+    description: 'Validar acessos administrativos no Business Manager, Google Ads e conta de anúncios.',
     day: 4,
-    icon: '📡',
-    priority: 'medium',
-    category: 'monitoramento',
+    tag: 'Campanha',
+    priority: 'high',
+    status: 'backlog',
   },
   {
-    title: 'Auditoria de Ativos & Drive',
-    description: 'Revisar e catalogar todos os materiais enviados pelo cliente no Google Drive.',
-    day: 5,
-    icon: '🔍',
-    priority: 'medium',
-    category: 'auditoria',
-  },
-  {
-    title: 'Setup Interno & Mídias',
-    description: 'Configurar ferramentas, acessos ao Meta Business Manager, Google Ads e estrutura interna.',
+    key: 'kickoff',
+    title: 'Kickoff Estratégico & Validação do Plano',
+    description: 'Reunião inicial para validar metas, persona, restrições e calendário.',
     day: 7,
-    icon: '⚙️',
+    tag: 'Campanha',
     priority: 'high',
-    category: 'setup',
+    status: 'backlog',
   },
   {
-    title: 'Kickoff Estratégico',
-    description: 'Reunião de alinhamento estratégico com o cliente para definir metas, personas e calendário.',
-    day: 12,
-    icon: '🚀',
-    priority: 'high',
-    category: 'reuniao',
-  },
-  {
-    title: 'Entrega do Job 01 / Plano de Mídia',
-    description: 'Entrega da primeira entrega do contrato para validação e aprovação do cliente.',
+    key: 'primeira-entrega',
+    title: 'Entrega do Job 01 para Aprovação',
+    description: 'Produzir primeira entrega do contrato e enviar link de aprovação.',
     day: 14,
-    icon: '🎯',
-    priority: 'urgent',
-    category: 'entrega',
+    tag: 'Social Media',
+    priority: 'high',
+    status: 'backlog',
   },
 ];
 
-export function generateOnboardingWorkflow(clientId, contractDate) {
-  const baseDate = contractDate ? new Date(contractDate) : new Date();
-  return WORKFLOW_TASKS.map((task, index) => {
-    const dueDate = new Date(baseDate);
-    dueDate.setDate(dueDate.getDate() + task.day);
-    return {
-      id: `onboarding-${clientId}-${index}-${Date.now()}`,
-      client_id: clientId,
-      title: task.title,
-      description: task.description,
-      status: 'a-fazer',
-      priority: task.priority,
-      category: task.category,
-      due_date: dueDate.toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      is_onboarding: true,
-      day_offset: task.day,
-      icon: task.icon,
-    };
-  });
+const DEFAULT_CHECKLIST = [
+  { id: 'dados', label: 'Dados cadastrais e contrato confirmados', done: false },
+  { id: 'brand', label: 'Brand Kit (cores, tipografia, logo e Drive) configurado', done: false },
+  { id: 'briefing', label: 'Briefing e regras de compliance validados', done: false },
+  { id: 'acessos', label: 'Acessos às contas de mídia e redes sociais liberados', done: false },
+  { id: 'kickoff', label: 'Kickoff estratégico realizado', done: false },
+];
+
+function nextBillingDate(billingDay = '10') {
+  const day = Math.min(28, Math.max(1, Number(billingDay) || 10));
+  const now = new Date();
+  const candidate = new Date(now.getFullYear(), now.getMonth(), day);
+  if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+    candidate.setMonth(candidate.getMonth() + 1);
+  }
+  return candidate.toISOString().split('T')[0];
 }
 
-const RULES = [
-  {
-    icon: '📋',
-    title: 'Briefings e Aprovações',
-    items: [
-      'Todo job começa com um briefing aprovado pelo cliente.',
-      'O prazo de aprovação no Review Center é de até 48 horas após o envio.',
-      'Sem aprovação documentada, nenhuma publicação é realizada.',
-    ],
-  },
-  {
-    icon: '📅',
-    title: 'Calendário e Prazos',
-    items: [
-      'O calendário editorial é entregue até o dia 25 de cada mês anterior.',
-      'Alterações de pauta devem ser solicitadas com 72 horas de antecedência.',
-      'Jobs urgentes fora de pauta possuem acréscimo de taxa emergencial.',
-    ],
-  },
-  {
-    icon: '💬',
-    title: 'Comunicação',
-    items: [
-      'O canal oficial de comunicação operacional é o portal e o WhatsApp do atendimento.',
-      'E-mails e tickets de suporte têm retorno em até 24 horas úteis.',
-      'Reuniões são agendadas com pelo menos 48 horas de antecedência.',
-    ],
-  },
-];
-
 export default function OnboardingModule({ client, onUpdateClient }) {
-  const { createTask } = useTasks(client?.id);
-  const [activeStep, setActiveStep] = useState('briefing');
-  const [generatingTasks, setGeneratingTasks] = useState(false);
-  const [tasksGenerated, setTasksGenerated] = useState(false);
-  const [synthesizingAi, setSynthesizingAi] = useState(false);
+  const { tasks: clientTasks, createTask, remoteMode } = useTasks(client?.id);
+  const { invoices, createInvoice } = useInvoices();
+  const [activeStep, setActiveStep] = useState('dados');
+  const [showLinkModal, setShowLinkModal] = useState(false);
 
-  // Briefing Form State
-  const storageKey = `csag_briefing_${client?.id || 'demo'}`;
-  const [briefing, setBriefing] = useState(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      return saved ? JSON.parse(saved) : {
-        business_summary: '',
-        main_products: '',
-        competitors: '',
-        target_audience: client?.target_audience || '',
-        tone_of_voice: client?.tone_of_voice || '',
-        main_goals: client?.strategic_goals || '',
-        drive_link: client?.drive_url || '',
-        social_instagram: '',
-        social_website: '',
-        notes: ''
-      };
-    } catch {
-      return {
-        business_summary: '',
-        main_products: '',
-        competitors: '',
-        target_audience: '',
-        tone_of_voice: '',
-        main_goals: '',
-        drive_link: '',
-        social_instagram: '',
-        social_website: '',
-        notes: ''
-      };
-    }
+  const [savingContract, setSavingContract] = useState(false);
+  const [savingBriefing, setSavingBriefing] = useState(false);
+  const [synthesizingAi, setSynthesizingAi] = useState(false);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [approvingPlan, setApprovingPlan] = useState(false);
+  const [generatingTasks, setGeneratingTasks] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [aiPlan, setAiPlan] = useState('');
+
+  const [contractForm, setContractForm] = useState({
+    document_id: client?.document_id || '',
+    contact_name: client?.contact_name || '',
+    contact_email: client?.contact_email || '',
+    contact_phone: client?.contact_phone || '',
+    monthly_fee: client?.monthly_fee ?? 0,
+    monthly_hours_contracted: client?.monthly_hours_contracted ?? 10,
+    billing_day: client?.billing_day || '10',
+    contract_start_date: client?.contract_start_date || new Date().toISOString().split('T')[0],
+    lifecycle_stage: client?.lifecycle_stage || 'onboarding',
   });
 
-  const setBField = (field, val) => {
-    setBriefing(prev => {
-      const updated = { ...prev, [field]: val };
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(updated));
-      } catch (e) {
-        console.warn(e);
-      }
-      return updated;
+  const storedBriefing = client?.briefing_data || client?.agency_metadata?.briefing_data || {};
+  const [briefing, setBriefing] = useState({
+    business_summary: storedBriefing.business_summary || '',
+    main_products: storedBriefing.main_products || '',
+    competitors: storedBriefing.competitors || '',
+    target_audience: client?.target_audience || storedBriefing.target_audience || '',
+    value_proposition: client?.value_proposition || storedBriefing.value_proposition || '',
+    main_goals: client?.strategic_goals || storedBriefing.main_goals || '',
+    ai_instructions: client?.ai_instructions || storedBriefing.ai_instructions || '',
+    forms_url: client?.forms_url || storedBriefing.forms_url || '',
+    notes: storedBriefing.notes || '',
+  });
+
+  const savedChecklist = Array.isArray(client?.onboarding_checklist) && client.onboarding_checklist.length > 0
+    ? client.onboarding_checklist
+    : DEFAULT_CHECKLIST;
+  const [checklist, setChecklist] = useState(savedChecklist);
+
+  useEffect(() => {
+    setContractForm({
+      document_id: client?.document_id || '',
+      contact_name: client?.contact_name || '',
+      contact_email: client?.contact_email || '',
+      contact_phone: client?.contact_phone || '',
+      monthly_fee: client?.monthly_fee ?? 0,
+      monthly_hours_contracted: client?.monthly_hours_contracted ?? 10,
+      billing_day: client?.billing_day || '10',
+      contract_start_date: client?.contract_start_date || new Date().toISOString().split('T')[0],
+      lifecycle_stage: client?.lifecycle_stage || 'onboarding',
     });
+    const b = client?.briefing_data || client?.agency_metadata?.briefing_data || {};
+    setBriefing({
+      business_summary: b.business_summary || '',
+      main_products: b.main_products || '',
+      competitors: b.competitors || '',
+      target_audience: client?.target_audience || b.target_audience || '',
+      value_proposition: client?.value_proposition || b.value_proposition || '',
+      main_goals: client?.strategic_goals || b.main_goals || '',
+      ai_instructions: client?.ai_instructions || b.ai_instructions || '',
+      forms_url: client?.forms_url || b.forms_url || '',
+      notes: b.notes || '',
+    });
+    setChecklist(
+      Array.isArray(client?.onboarding_checklist) && client.onboarding_checklist.length > 0
+        ? client.onboarding_checklist
+        : DEFAULT_CHECKLIST
+    );
+  }, [client]);
+
+  const existingOnboardingCount = useMemo(
+    () => (clientTasks || []).filter(t => t.title?.startsWith('[ONBOARDING]')).length,
+    [clientTasks]
+  );
+
+  const clientInvoicesThisMonth = useMemo(() => {
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    return (invoices || []).filter(
+      inv => inv.client_id === client?.id && String(inv.due_date || '').startsWith(monthPrefix) && inv.status !== 'cancelled'
+    );
+  }, [invoices, client?.id]);
+
+  const completedChecklistCount = checklist.filter(i => i.done).length;
+  const progressPct = Math.round((completedChecklistCount / checklist.length) * 100);
+
+  const handleSaveContract = async (e) => {
+    e.preventDefault();
+    if (!onUpdateClient || !client) return;
+    setSavingContract(true);
+    try {
+      await onUpdateClient({
+        ...client,
+        ...contractForm,
+        monthly_fee: Number(contractForm.monthly_fee) || 0,
+        monthly_hours_contracted: Number(contractForm.monthly_hours_contracted) || 10,
+      });
+    } finally {
+      setSavingContract(false);
+    }
   };
 
-  const handleSaveBriefing = (e) => {
+  const handleSaveBriefing = async (e) => {
     if (e) e.preventDefault();
+    if (!onUpdateClient || !client) return;
+    setSavingBriefing(true);
     try {
-      localStorage.setItem(storageKey, JSON.stringify(briefing));
-      if (onUpdateClient && briefing.drive_link && briefing.drive_link !== client.drive_url) {
-        onUpdateClient({ ...client, drive_url: briefing.drive_link });
-      }
-      toast.success('Briefing salvo com sucesso!');
-    } catch (err) {
-      toast.error('Erro ao salvar briefing.');
+      await onUpdateClient({
+        ...client,
+        target_audience: briefing.target_audience,
+        value_proposition: briefing.value_proposition,
+        strategic_goals: briefing.main_goals,
+        ai_instructions: briefing.ai_instructions,
+        forms_url: briefing.forms_url,
+        briefing_data: briefing,
+      });
+    } finally {
+      setSavingBriefing(false);
     }
   };
 
   const handleSynthesizeAI = async () => {
     if (!briefing.business_summary.trim() && !briefing.main_products.trim()) {
-      toast.error('Preencha ao menos o resumo do negócio ou produtos antes de sintetizar com IA.');
+      toast.error('Preencha ao menos o resumo do negócio ou produtos antes de sintetizar.');
       return;
     }
 
     setSynthesizingAi(true);
     try {
-      const prompt = `Você é um Diretor de Estratégia e Branding de uma agência de publicidade de elite.
-Analise as respostas do Briefing de Onboarding do cliente abaixo e gere uma síntese estratégica estruturada em formato JSON válido:
-
-Briefing do Cliente:
-- Nome da Empresa: ${client?.name || 'Cliente'}
-- Resumo do Negócio: ${briefing.business_summary}
-- Principais Produtos/Serviços: ${briefing.main_products}
+      const prompt = `Você é o Diretor de Estratégia da Comunicação Social Ag.
+Analise o briefing abaixo e gere JSON válido com campos diretos e reais (sem travessão longo):
+- Cliente: ${client?.name || 'Cliente'}
+- Resumo: ${briefing.business_summary}
+- Produtos/Serviços: ${briefing.main_products}
 - Concorrentes: ${briefing.competitors}
-- Público-Alvo: ${briefing.target_audience}
-- Tom de Voz Desejado: ${briefing.tone_of_voice}
-- Objetivos de Comunicação: ${briefing.main_goals}
+- Público: ${briefing.target_audience}
+- Objetivos: ${briefing.main_goals}
 
-Retorne estritamente um JSON no seguinte formato:
+Formato estrito:
 {
-  "target_audience": "Descrição refinada do público e persona",
-  "tone_of_voice": "Tom de voz e posicionamento de marca resumido em 3 a 5 palavras",
-  "strategic_goals": "Objetivos claros e mensuráveis para a agência focar",
-  "suggested_channels": ["Meta Ads", "Instagram Conteúdo", "Google Ads"]
+  "target_audience": "Descrição objetiva da persona e público",
+  "value_proposition": "Proposta de valor central em 1 frase",
+  "tone_of_voice": "Tom de voz em 3 a 5 palavras",
+  "strategic_goals": "Metas claras de comunicação"
 }`;
 
-      const aiResponse = await generateContent(prompt);
-      
-      // Tentar extrair o JSON da resposta da IA
-      let jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        setBriefing(prev => ({
-          ...prev,
-          target_audience: parsed.target_audience || prev.target_audience,
-          tone_of_voice: parsed.tone_of_voice || prev.tone_of_voice,
-          main_goals: parsed.strategic_goals || prev.main_goals
-        }));
-
-        if (onUpdateClient) {
-          onUpdateClient({
-            ...client,
-            target_audience: parsed.target_audience || client.target_audience,
-            tone_of_voice: parsed.tone_of_voice || client.tone_of_voice,
-            strategic_goals: parsed.strategic_goals || client.strategic_goals
-          });
-        }
-        toast.success('Síntese com IA concluída! DNA do cliente atualizado.');
-      } else {
-        toast.success('IA respondeu a análise do briefing!');
+      const aiResponse = await generateContent(prompt, 'auto', { requireProvider: true });
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        toast.error('A IA não retornou o formato esperado. Tente novamente.');
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro na síntese com IA. Verifique se o Gemini está disponível.');
+      const parsed = JSON.parse(jsonMatch[0]);
+      const updatedBriefing = {
+        ...briefing,
+        target_audience: parsed.target_audience || briefing.target_audience,
+        value_proposition: parsed.value_proposition || briefing.value_proposition,
+        main_goals: parsed.strategic_goals || briefing.main_goals,
+      };
+      setBriefing(updatedBriefing);
+      if (onUpdateClient && client) {
+        await onUpdateClient({
+          ...client,
+          target_audience: updatedBriefing.target_audience,
+          value_proposition: updatedBriefing.value_proposition,
+          tone_of_voice: parsed.tone_of_voice || client.tone_of_voice,
+          strategic_goals: updatedBriefing.main_goals,
+          briefing_data: updatedBriefing,
+        });
+      }
+      toast.success('DNA sintetizado e salvo na ficha do cliente.');
+    } catch {
+      toast.error('IA indisponível agora. Preencha e salve manualmente.');
     } finally {
       setSynthesizingAi(false);
     }
   };
 
+  const handleGeneratePlan = async () => {
+    const rawAnswers = [
+      briefing.business_summary,
+      briefing.main_products,
+      briefing.competitors,
+      briefing.target_audience,
+      briefing.main_goals,
+    ].filter(Boolean).join('\n');
+
+    if (!rawAnswers.trim()) {
+      toast.error('Preencha o briefing primeiro para gerar o plano.');
+      return;
+    }
+
+    setGeneratingPlan(true);
+    try {
+      const { text } = await generateStrategicPlan(client, rawAnswers);
+      setAiPlan(text || '');
+    } catch {
+      toast.error('Não foi possível gerar o plano agora.');
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
+
+  const handleApprovePlan = async () => {
+    if (!aiPlan.trim() || !client?.id) return;
+    setApprovingPlan(true);
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.from('ai_memories').upsert({
+          client_id: client.id,
+          key: 'strategic_plan_3months',
+          value: aiPlan,
+        }, { onConflict: 'client_id,key' });
+      }
+      const milestones = [
+        { key: 'm1', title: 'Mês 1: Setup, Alinhamento e Tração', days: 30, hours: 10, tag: 'Campanha' },
+        { key: 'm2', title: 'Mês 2: Escala, Conversão e Otimização', days: 60, hours: 15, tag: 'Campanha' },
+        { key: 'm3', title: 'Mês 3: Retenção, BI e Otimização Contínua', days: 90, hours: 15, tag: 'Campanha' },
+      ];
+      for (const m of milestones) {
+        await createTask({
+          id: await operationId(`plano-90d-${client.id}-${m.key}`, remoteMode),
+          title: m.title,
+          client_id: client.id,
+          client_name: client.name,
+          status: 'backlog',
+          tag: m.tag,
+          priority: 'medium',
+          estimated_hours: m.hours,
+          deadline: new Date(Date.now() + m.days * 86400000).toISOString().split('T')[0],
+        });
+      }
+      toast.success('Plano de 90 dias salvo e marcos enviados para Produção.');
+      setAiPlan('');
+    } catch {
+      toast.error('Erro ao salvar o plano na operação.');
+    } finally {
+      setApprovingPlan(false);
+    }
+  };
+
+  const handleToggleChecklist = async (itemId) => {
+    const next = checklist.map(item => item.id === itemId ? { ...item, done: !item.done } : item);
+    setChecklist(next);
+    if (onUpdateClient && client) {
+      await onUpdateClient({ ...client, onboarding_checklist: next });
+    }
+  };
+
   const handleGenerateWorkflow = async () => {
+    if (!client?.id) return;
     setGeneratingTasks(true);
     try {
       const today = new Date();
+      let createdCount = 0;
       for (const task of WORKFLOW_TASKS) {
         const dueDate = new Date(today);
         dueDate.setDate(dueDate.getDate() + task.day);
-        
-        await createTask({
-          title: `[ONBOARDING] ${task.title}`,
-          description: `${task.description}\n\nCliente: ${client?.name}`,
-          client_id: client?.id,
-          client_name: client?.name,
+        const taskTitle = `[ONBOARDING] ${task.title}`;
+        const alreadyExists = (clientTasks || []).some(t => t.title === taskTitle);
+        if (alreadyExists) continue;
+
+        const saved = await createTask({
+          id: await operationId(`onboarding-step-${client.id}-${task.key}`, remoteMode),
+          title: taskTitle,
+          notes: `${task.description}\n\nCliente: ${client.name}`,
+          client_id: client.id,
+          client_name: client.name,
+          tag: task.tag,
           priority: task.priority,
-          status: 'a-fazer',
-          deadline: dueDate.toISOString().split('T')[0]
+          status: task.status,
+          deadline: dueDate.toISOString().split('T')[0],
         });
+        if (saved) createdCount++;
       }
-      setTasksGenerated(true);
-      toast.success('Workflow de 6 tarefas de Onboarding gerado na Produção!');
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro ao gerar workflow de tarefas.');
+      if (createdCount === 0) {
+        toast.success('Todas as tarefas de onboarding já estavam criadas em Produção.');
+      } else {
+        toast.success(`${createdCount} tarefa(s) de onboarding criadas em Produção.`);
+      }
     } finally {
       setGeneratingTasks(false);
     }
   };
 
+  const handleCreateFirstInvoice = async () => {
+    if (!client?.id) return;
+    const fee = Number(contractForm.monthly_fee || client.monthly_fee || 0);
+    if (fee <= 0) {
+      toast.error('Defina um Fee Mensal maior que R$ 0 na etapa 1 antes de gerar cobrança.');
+      setActiveStep('dados');
+      return;
+    }
+    if (clientInvoicesThisMonth.length > 0) {
+      toast.error('Já existe uma cobrança ativa registrada neste mês para este cliente.');
+      return;
+    }
+    setCreatingInvoice(true);
+    try {
+      await createInvoice({
+        client_id: client.id,
+        service: `Mensalidade Fee | ${client.name}`,
+        amount: fee,
+        due_date: nextBillingDate(contractForm.billing_day || client.billing_day),
+      });
+    } finally {
+      setCreatingInvoice(false);
+    }
+  };
+
+  const handleCompleteOnboarding = async () => {
+    if (!onUpdateClient || !client) return;
+    await onUpdateClient({
+      ...client,
+      lifecycle_stage: 'producao',
+      onboarding_checklist: checklist,
+      onboarding_completed_at: new Date().toISOString(),
+    });
+    toast.success('Onboarding concluído. Conta avançou para Produção Ativa.');
+  };
+
+  const steps = [
+    { id: 'dados', label: '1. Dados & Contrato', icon: Building2 },
+    { id: 'brand', label: '2. Brand Kit & Drive', icon: Palette },
+    { id: 'briefing', label: '3. Briefing & IA', icon: FileText },
+    { id: 'setup', label: '4. Setup & Cobrança', icon: Rocket },
+  ];
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-cs-border pb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-cs-primary/10 border border-cs-primary/30 flex items-center justify-center text-cs-primary">
-            <Rocket size={26} />
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header + Progress */}
+      <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-cs-primary/10 border border-cs-primary/30 flex items-center justify-center text-cs-primary">
+              <Rocket size={22} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Onboarding & Implantação da Conta</h2>
+              <p className="text-xs text-cs-text-secondary">
+                Tudo salvo no banco oficial da conta: contrato, Brand Center, briefing, tarefas e primeira fatura.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">Hub de Onboarding & Entrada do Cliente</h2>
-            <p className="text-xs text-cs-text-secondary">Gestão de briefings, coleta de ativos, síntese de IA e alinhamentos operacionais.</p>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowLinkModal(true)}
+              className="bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+            >
+              <MessageSquare size={14} /> Link WhatsApp (/cadastro)
+            </button>
+            <div className="bg-cs-bg border border-cs-border px-3.5 py-2 rounded-xl text-xs">
+              <span className="text-cs-text-secondary mr-2">Checklist:</span>
+              <strong className="text-white">{progressPct}%</strong>
+            </div>
           </div>
         </div>
 
-        {/* Stepper Navigation */}
-        <div className="flex items-center bg-cs-surface border border-cs-border p-1 rounded-2xl shrink-0">
-          <button
-            onClick={() => setActiveStep('briefing')}
-            className={cn(
-              "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-              activeStep === 'briefing' ? "bg-cs-primary text-white" : "text-cs-text-secondary hover:text-white"
-            )}
-          >
-            <FileText size={14} /> 1. Briefing
-          </button>
-          <button
-            onClick={() => setActiveStep('drive')}
-            className={cn(
-              "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-              activeStep === 'drive' ? "bg-cs-primary text-white" : "text-cs-text-secondary hover:text-white"
-            )}
-          >
-            <Link2 size={14} /> 2. Drive & Acessos
-          </button>
-          <button
-            onClick={() => setActiveStep('workflow')}
-            className={cn(
-              "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-              activeStep === 'workflow' ? "bg-cs-primary text-white" : "text-cs-text-secondary hover:text-white"
-            )}
-          >
-            <CheckCircle2 size={14} /> 3. Workflow Setup
-          </button>
-          <button
-            onClick={() => setActiveStep('regras')}
-            className={cn(
-              "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-              activeStep === 'regras' ? "bg-cs-primary text-white" : "text-cs-text-secondary hover:text-white"
-            )}
-          >
-            <Shield size={14} /> 4. Diretrizer
-          </button>
+        {/* Stepper */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          {steps.map(step => (
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => setActiveStep(step.id)}
+              className={cn(
+                'px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border cursor-pointer',
+                activeStep === step.id
+                  ? 'bg-cs-primary text-black border-cs-primary shadow-md'
+                  : 'bg-cs-bg text-cs-text-secondary border-cs-border hover:text-white'
+              )}
+            >
+              <step.icon size={14} /> {step.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Step 1: Briefing do Cliente */}
-      {activeStep === 'briefing' && (
-        <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-6 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-cs-border pb-4">
-            <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileText size={20} className="text-cs-primary" /> Questionário de Briefing de Entrada
-              </h3>
-              <p className="text-xs text-cs-text-secondary">Preencha as informações essenciais para a agência entender a essência do cliente.</p>
-            </div>
-            <button
-              onClick={handleSynthesizeAI}
-              disabled={synthesizingAi}
-              className="bg-cs-primary hover:bg-cs-primary-hover text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg disabled:opacity-50"
-            >
-              <Sparkles size={16} /> {synthesizingAi ? 'Sintetizando...' : 'Sintetizar DNA com IA'}
-            </button>
+      {/* Step 1: Dados & Contrato */}
+      {activeStep === 'dados' && (
+        <form onSubmit={handleSaveContract} className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-5">
+          <div>
+            <h3 className="text-base font-bold text-white">Dados Cadastrais, Contrato & Fee</h3>
+            <p className="text-xs text-cs-text-secondary">Confira os dados vindos do CRM ou da Ficha Cadastral do cliente.</p>
           </div>
 
-          <form onSubmit={handleSaveBriefing} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">CNPJ / CPF / Registro (CRM)</label>
+              <input
+                type="text"
+                value={contractForm.document_id}
+                onChange={e => setContractForm(p => ({ ...p, document_id: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Responsável / Contato</label>
+              <input
+                type="text"
+                value={contractForm.contact_name}
+                onChange={e => setContractForm(p => ({ ...p, contact_name: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">WhatsApp / Telefone</label>
+              <input
+                type="text"
+                value={contractForm.contact_phone}
+                onChange={e => setContractForm(p => ({ ...p, contact_phone: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">E-mail de Contato</label>
+              <input
+                type="email"
+                value={contractForm.contact_email}
+                onChange={e => setContractForm(p => ({ ...p, contact_email: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Fee Mensal (R$)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={contractForm.monthly_fee}
+                onChange={e => setContractForm(p => ({ ...p, monthly_fee: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Horas Contratadas / Mês</label>
+              <input
+                type="number"
+                min="1"
+                step="0.5"
+                value={contractForm.monthly_hours_contracted}
+                onChange={e => setContractForm(p => ({ ...p, monthly_hours_contracted: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Dia de Vencimento</label>
+              <select
+                value={contractForm.billing_day}
+                onChange={e => setContractForm(p => ({ ...p, billing_day: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              >
+                {['05', '10', '15', '20', '25', '30'].map(d => (
+                  <option key={d} value={d}>Dia {d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Início do Contrato</label>
+              <input
+                type="date"
+                value={contractForm.contract_start_date}
+                onChange={e => setContractForm(p => ({ ...p, contract_start_date: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Estágio da Conta</label>
+              <select
+                value={contractForm.lifecycle_stage}
+                onChange={e => setContractForm(p => ({ ...p, lifecycle_stage: e.target.value }))}
+                className="w-full bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cs-primary"
+              >
+                <option value="onboarding">Onboarding / Setup</option>
+                <option value="estrategia">Estratégia & Planejamento</option>
+                <option value="producao">Produção Ativa</option>
+                <option value="performance">Escala & Performance</option>
+                <option value="retencao">Retenção / Renovação</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-cs-border">
+            <button
+              type="button"
+              onClick={() => setActiveStep('brand')}
+              className="px-4 py-2.5 rounded-xl border border-cs-border text-xs font-bold text-cs-text-secondary hover:text-white cursor-pointer"
+            >
+              Ir para Brand Kit
+            </button>
+            <button
+              type="submit"
+              disabled={savingContract}
+              className="bg-cs-primary hover:bg-cs-primary-hover text-black px-5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Save size={15} /> {savingContract ? 'Salvando...' : 'Salvar Dados do Contrato'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Step 2: Brand Kit & Drive */}
+      {activeStep === 'brand' && (
+        <BrandKitEditor
+          client={client}
+          onSave={onUpdateClient}
+          alwaysEditing
+          saveLabel="Salvar Brand Kit no Banco"
+        />
+      )}
+
+      {/* Step 3: Briefing & Estratégia IA */}
+      {activeStep === 'briefing' && (
+        <div className="space-y-6">
+          <form onSubmit={handleSaveBriefing} className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-cs-border pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white">Briefing Estratégico & Regras de DNA</h3>
+                <p className="text-xs text-cs-text-secondary">Persistido diretamente na ficha oficial do cliente no Supabase.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSynthesizeAI}
+                disabled={synthesizingAi}
+                className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles size={14} /> {synthesizingAi ? 'Sintetizando...' : 'Sintetizar DNA com IA'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Resumo da Empresa / História do Negócio</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Resumo do Negócio / Contexto</label>
                 <textarea
                   rows={3}
                   value={briefing.business_summary}
-                  onChange={e => setBField('business_summary', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Qual a história da empresa, o que ela faz e qual seu propósito no mercado?"
+                  onChange={e => setBriefing(p => ({ ...p, business_summary: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Principais Produtos & Serviços (Carro-chefe)</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Produtos / Serviços Principais</label>
                 <textarea
                   rows={3}
                   value={briefing.main_products}
-                  onChange={e => setBField('main_products', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Quais os 3 principais produtos/serviços e margem/ticket médio?"
+                  onChange={e => setBriefing(p => ({ ...p, main_products: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Concorrentes Diretos & Indiretos</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Concorrentes & Referências</label>
                 <textarea
                   rows={3}
                   value={briefing.competitors}
-                  onChange={e => setBField('competitors', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Quem são os principais concorrentes que você admira ou combate no mercado?"
+                  onChange={e => setBriefing(p => ({ ...p, competitors: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Público-Alvo & Persona</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Público-Alvo / Persona</label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={briefing.target_audience}
-                  onChange={e => setBField('target_audience', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Faixa etária, gênero, dores, necessidades e desejos do comprador ideal."
+                  onChange={e => setBriefing(p => ({ ...p, target_audience: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Tom de Voz & Diretrizes de Comunicação</label>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Proposta de Valor / Diferenciais</label>
                 <textarea
-                  rows={3}
-                  value={briefing.tone_of_voice}
-                  onChange={e => setBField('tone_of_voice', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="Ex: Sofisticado, Jovem, Educativo, Direto ao ponto. O que NÃO dizer?"
+                  rows={2}
+                  value={briefing.value_proposition}
+                  onChange={e => setBriefing(p => ({ ...p, value_proposition: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
                 />
               </div>
-
-              <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Objetivos Principais do Contrato</label>
+              <div>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Objetivos Estratégicos do Contrato</label>
                 <textarea
                   rows={2}
                   value={briefing.main_goals}
-                  onChange={e => setBField('main_goals', e.target.value)}
-                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-4 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
-                  placeholder="O que fará a agência ter sucesso nos próximos 6 meses com este cliente?"
+                  onChange={e => setBriefing(p => ({ ...p, main_goals: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Restrições & Compliance (ex: CFM/CFO)</label>
+                <textarea
+                  rows={2}
+                  value={briefing.ai_instructions}
+                  onChange={e => setBriefing(p => ({ ...p, ai_instructions: e.target.value }))}
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cs-primary resize-none"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-[10px] font-bold text-cs-text-secondary uppercase block mb-1.5">Link de Questionário Externo (Google Forms, se usado)</label>
+                <input
+                  type="url"
+                  value={briefing.forms_url}
+                  onChange={e => setBriefing(p => ({ ...p, forms_url: e.target.value }))}
+                  placeholder="https://forms.gle/..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cs-primary"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-cs-border">
+            <div className="flex flex-wrap justify-between gap-3 pt-4 border-t border-cs-border">
+              <button
+                type="button"
+                onClick={handleGeneratePlan}
+                disabled={generatingPlan}
+                className="px-4 py-2.5 rounded-xl border border-cs-border hover:border-cs-primary text-xs font-bold text-white flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles size={14} className="text-cs-primary" /> {generatingPlan ? 'Gerando Plano...' : 'Gerar Plano 90 Dias (IA)'}
+              </button>
               <button
                 type="submit"
-                className="bg-cs-primary hover:bg-cs-primary-hover text-white px-6 py-2.5 rounded-xl font-bold text-xs transition-all shadow-lg flex items-center gap-2"
+                disabled={savingBriefing}
+                className="bg-cs-primary hover:bg-cs-primary-hover text-black px-5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Save size={16} /> Salvar Briefing
+                <Save size={15} /> {savingBriefing ? 'Salvando...' : 'Salvar Briefing & DNA'}
               </button>
             </div>
           </form>
+
+          {aiPlan && (
+            <div className="bg-cs-surface border border-cs-primary/30 rounded-3xl p-6 space-y-4">
+              <h4 className="text-sm font-bold text-white">Rascunho de Plano Estratégico (90 Dias)</h4>
+              <pre className="whitespace-pre-wrap font-sans text-xs text-cs-text-primary bg-cs-bg border border-cs-border rounded-2xl p-4 max-h-80 overflow-y-auto custom-scrollbar">
+                {aiPlan}
+              </pre>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAiPlan('')}
+                  className="px-4 py-2 text-xs font-bold text-cs-text-secondary hover:text-white cursor-pointer"
+                >
+                  Descartar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApprovePlan}
+                  disabled={approvingPlan}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs cursor-pointer disabled:opacity-50"
+                >
+                  {approvingPlan ? 'Salvando...' : 'Aprovar Plano & Criar Marcos em Produção'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Step 2: Drive & Acessos */}
-      {activeStep === 'drive' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Step 4: Setup, Produção & Cobrança */}
+      {activeStep === 'setup' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Checklist Persistido */}
           <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-4">
-            <div className="w-12 h-12 bg-blue-500/10 text-blue-500 rounded-2xl flex items-center justify-center">
-              <Link2 size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-white">Google Drive do Cliente</h3>
-            <p className="text-xs text-cs-text-secondary leading-relaxed">
-              Pasta oficial no Google Drive onde o cliente disponibiliza materiais de marca, imagens, logotipos e vídeos brutos.
-            </p>
-
-            <div className="space-y-2 pt-2">
-              <label className="text-[10px] font-bold text-cs-text-secondary uppercase block">Link Compartilhado do Drive</label>
-              <input
-                type="url"
-                value={briefing.drive_link}
-                onChange={e => {
-                  setBField('drive_link', e.target.value);
-                  if (onUpdateClient) onUpdateClient({ ...client, drive_url: e.target.value });
-                }}
-                className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cs-primary"
-                placeholder="https://drive.google.com/drive/folders/..."
-              />
-            </div>
-
-            {briefing.drive_link ? (
-              <a
-                href={briefing.drive_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-cs-primary hover:bg-cs-primary-hover text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md"
-              >
-                Acessar Pasta do Drive no Navegador <ExternalLink size={14} />
-              </a>
-            ) : (
-              <p className="text-[10px] text-yellow-400 font-bold">Nenhum link de Drive configurado ainda.</p>
-            )}
-          </div>
-
-          <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-4">
-            <div className="w-12 h-12 bg-purple-500/10 text-purple-500 rounded-2xl flex items-center justify-center">
-              <Lock size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-white">Cofre de Acessos & Mídias</h3>
-            <p className="text-xs text-cs-text-secondary leading-relaxed">
-              Cadastre senhas de redes sociais, acessos do Meta Business Suite e Google Ads com criptografia na aba **Cofre Seguro**.
-            </p>
-
-            <div className="p-4 bg-cs-bg rounded-2xl border border-cs-border space-y-3">
-              <div className="flex justify-between items-center text-xs text-cs-text-secondary">
-                <span>Instagram Business:</span>
-                <span className="text-white font-bold">{briefing.social_instagram || '@dubola_molhos'}</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Shield size={18} className="text-cs-primary" /> Checklist de Implantação
+                </h3>
+                <p className="text-xs text-cs-text-secondary">
+                  {completedChecklistCount} de {checklist.length} etapas concluídas
+                </p>
               </div>
-              <div className="flex justify-between items-center text-xs text-cs-text-secondary">
-                <span>Website Principal:</span>
-                <span className="text-white font-bold">{briefing.social_website || 'dubola.com.br'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Step 3: Workflow Setup (30 Dias) */}
-      {activeStep === 'workflow' && (
-        <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-cs-border pb-4">
-            <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <CheckCircle2 size={20} className="text-cs-primary" /> Workflow de Onboarding (30 Dias)
-              </h3>
-              <p className="text-xs text-cs-text-secondary">Dispare as tarefas padronizadas de entrada do cliente diretamente para a fila de Produção.</p>
-            </div>
-
-            <button
-              onClick={handleGenerateWorkflow}
-              disabled={generatingTasks || tasksGenerated}
-              className={cn(
-                "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg",
-                tasksGenerated ? "bg-green-500/20 text-green-400 border border-green-500/30" : "bg-cs-primary hover:bg-cs-primary-hover text-white"
+              {client?.lifecycle_stage === 'onboarding' && (
+                <button
+                  type="button"
+                  onClick={handleCompleteOnboarding}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer"
+                >
+                  Concluir Onboarding
+                </button>
               )}
-            >
-              <Rocket size={16} /> {tasksGenerated ? 'Workflow Ativo na Produção' : generatingTasks ? 'Gerando Tarefas...' : 'Disparar Tarefas de Setup'}
-            </button>
-          </div>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {WORKFLOW_TASKS.map((t, idx) => (
-              <div key={idx} className="bg-cs-bg border border-cs-border rounded-2xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xl">{t.icon}</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cs-surface text-cs-text-secondary uppercase">
-                    Dia {t.day}
+            <div className="space-y-2.5">
+              {checklist.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleToggleChecklist(item.id)}
+                  className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-cs-bg border border-cs-border hover:border-cs-primary/40 text-left transition-all cursor-pointer"
+                >
+                  {item.done ? (
+                    <CheckSquare size={18} className="text-emerald-400 shrink-0" />
+                  ) : (
+                    <Square size={18} className="text-cs-text-secondary shrink-0" />
+                  )}
+                  <span className={cn('text-xs font-semibold', item.done ? 'text-cs-text-secondary line-through' : 'text-white')}>
+                    {item.label}
                   </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ações de Produção & Faturamento */}
+          <div className="space-y-6">
+            <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <CheckCircle2 size={18} className="text-cs-primary" /> Esteira de Setup em Produção
+                  </h3>
+                  <p className="text-xs text-cs-text-secondary">
+                    {existingOnboardingCount > 0
+                      ? `${existingOnboardingCount} tarefa(s) de onboarding já estão na fila de Produção.`
+                      : 'Dispare as 5 tarefas padrão de setup sem duplicar.'}
+                  </p>
                 </div>
-                <h4 className="text-sm font-bold text-white">{t.title}</h4>
-                <p className="text-xs text-cs-text-secondary leading-relaxed">{t.description}</p>
+                <button
+                  type="button"
+                  onClick={handleGenerateWorkflow}
+                  disabled={generatingTasks}
+                  className="bg-cs-primary hover:bg-cs-primary-hover text-black px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50"
+                >
+                  {generatingTasks ? 'Gerando...' : existingOnboardingCount > 0 ? 'Sincronizar Faltantes' : 'Criar Tarefas em Produção'}
+                </button>
               </div>
-            ))}
+
+              <div className="space-y-2">
+                {WORKFLOW_TASKS.map(t => (
+                  <div key={t.key} className="flex items-center justify-between bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5 text-xs">
+                    <span className="text-white font-medium truncate pr-2">{t.title}</span>
+                    <span className="text-[10px] font-mono text-cs-text-secondary shrink-0">D+{t.day}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <DollarSign size={18} className="text-emerald-400" /> Primeira Cobrança do Contrato
+                  </h3>
+                  <p className="text-xs text-cs-text-secondary">
+                    Fee atual: <strong className="text-white">R$ {Number(contractForm.monthly_fee || client?.monthly_fee || 0).toLocaleString('pt-BR')}</strong> · Vencimento todo dia <strong className="text-white">{contractForm.billing_day}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCreateFirstInvoice}
+                  disabled={creatingInvoice || clientInvoicesThisMonth.length > 0}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50"
+                >
+                  {clientInvoicesThisMonth.length > 0
+                    ? 'Fatura do Mês Criada'
+                    : creatingInvoice
+                      ? 'Gerando...'
+                      : 'Gerar 1ª Fatura'}
+                </button>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-cs-text-secondary bg-cs-bg border border-cs-border rounded-xl px-3.5 py-2.5">
+                <Calendar size={14} className="text-cs-primary shrink-0" />
+                <span>Próximo vencimento sugerido: {nextBillingDate(contractForm.billing_day).split('-').reverse().join('/')}</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Step 4: Regras & Diretrizes da Agência */}
-      {activeStep === 'regras' && (
-        <div className="bg-cs-surface border border-cs-border rounded-3xl p-6 space-y-6">
-          <div>
-            <h3 className="text-lg font-bold text-white mb-1">Acordo de Nível de Serviço (SLA) & Regras da Agência</h3>
-            <p className="text-xs text-cs-text-secondary">Diretrizes operacionais alinhadas com o cliente para garantir pontualidade e qualidade nas entregas.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {RULES.map((rule, idx) => (
-              <div key={idx} className="bg-cs-bg border border-cs-border rounded-2xl p-6 space-y-4">
-                <div className="text-2xl">{rule.icon}</div>
-                <h4 className="text-white font-bold text-sm">{rule.title}</h4>
-                <ul className="space-y-2">
-                  {rule.items.map((item, i) => (
-                    <li key={i} className="text-xs text-cs-text-secondary flex items-start gap-2">
-                      <span className="text-cs-primary font-bold">•</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <RegistrationLinkModal
+        isOpen={showLinkModal}
+        onClose={() => setShowLinkModal(false)}
+        context={{
+          clientId: client?.id,
+          company: client?.name,
+          contact: client?.contact_name,
+          phone: client?.contact_phone,
+          value: client?.monthly_fee,
+        }}
+      />
     </div>
   );
 }

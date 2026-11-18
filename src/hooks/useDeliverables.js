@@ -225,8 +225,8 @@ function useVersions(taskId) {
           throw new Error('Abra a versão atual e confira se ainda está pendente.');
         }
         if (!await updateTask({
-          id: targetId, status: decision === 'aprovado' ? 'em-producao' : 'ajustes',
-          demand_status: decision === 'aprovado' ? 'em_producao' : 'ajustes',
+          id: targetId, status: decision === 'aprovado' ? 'concluido' : 'ajustes',
+          demand_status: decision === 'aprovado' ? 'concluido' : 'ajustes',
         })) throw new Error('Não foi possível atualizar a demanda.');
         saved = { ...latest, status: decision, client_comment: feedback, reviewed_at: new Date().toISOString() };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => item.id === versionId ? saved : item)));

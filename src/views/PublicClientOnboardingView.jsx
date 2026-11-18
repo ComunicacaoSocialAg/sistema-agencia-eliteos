@@ -1,23 +1,21 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Building2, 
   UserCheck, 
   MapPin, 
   CreditCard, 
-  Globe, 
+  Palette,
   CheckCircle2, 
   Send, 
   ShieldCheck, 
   Search, 
-  FileText, 
   Phone, 
   Mail, 
-  Lock,
-  ArrowRight,
-  ExternalLink
+  Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useClientRegistrations } from '../hooks/useClientRegistrations';
+import { normalizeHexColor } from '../lib/brandKit';
 
 function InstagramIcon({ size = 18, className = "" }) {
   return (
@@ -42,14 +40,28 @@ function InstagramIcon({ size = 18, className = "" }) {
 export default function PublicClientOnboardingView() {
   const { submitRegistration } = useClientRegistrations();
 
+  const urlContext = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        deal_id: params.get('deal') || '',
+        client_id: params.get('client') || '',
+        company: params.get('company') || '',
+        deal_value: params.get('value') || '',
+      };
+    } catch {
+      return { deal_id: '', client_id: '', company: '', deal_value: '' };
+    }
+  }, []);
+
   const [personType, setPersonType] = useState('PJ'); // 'PJ' ou 'PF'
   const [loadingCep, setLoadingCep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittedData, setSubmittedData] = useState(null);
 
   const [form, setForm] = useState({
-    company_name: '',
-    trade_name: '',
+    company_name: urlContext.company || '',
+    trade_name: urlContext.company || '',
     document_number: '',
     state_registration: '',
     representative_name: '',
@@ -68,7 +80,15 @@ export default function PublicClientOnboardingView() {
     state: 'MG',
     instagram_handle: '',
     website_url: '',
-    observations: ''
+    observations: '',
+    drive_url: '',
+    logo_url: '',
+    primary_color: '',
+    secondary_color: '',
+    accent_color: '',
+    typography: '',
+    tone_of_voice: '',
+    target_audience: ''
   });
 
   // Formatadores de campos
@@ -167,9 +187,29 @@ export default function PublicClientOnboardingView() {
 
     setSubmitting(true);
     try {
+      const {
+        drive_url, logo_url, primary_color, secondary_color, accent_color,
+        typography, tone_of_voice, target_audience, ...baseForm
+      } = form;
+
+      const raw_data = {
+        ...(urlContext.deal_id ? { deal_id: urlContext.deal_id } : {}),
+        ...(urlContext.client_id ? { client_id: urlContext.client_id } : {}),
+        ...(urlContext.deal_value ? { deal_value: Number(urlContext.deal_value) || 0 } : {}),
+        ...(drive_url.trim() ? { drive_url: drive_url.trim() } : {}),
+        ...(logo_url.trim() ? { logo_url: logo_url.trim() } : {}),
+        ...(primary_color.trim() ? { primary_color: normalizeHexColor(primary_color, primary_color.trim()) } : {}),
+        ...(secondary_color.trim() ? { secondary_color: normalizeHexColor(secondary_color, secondary_color.trim()) } : {}),
+        ...(accent_color.trim() ? { accent_color: normalizeHexColor(accent_color, accent_color.trim()) } : {}),
+        ...(typography.trim() ? { typography: typography.trim() } : {}),
+        ...(tone_of_voice.trim() ? { tone_of_voice: tone_of_voice.trim() } : {}),
+        ...(target_audience.trim() ? { target_audience: target_audience.trim() } : {}),
+      };
+
       const payload = {
-        ...form,
-        person_type: personType
+        ...baseForm,
+        person_type: personType,
+        raw_data,
       };
 
       const res = await submitRegistration(payload);
@@ -684,6 +724,111 @@ export default function PublicClientOnboardingView() {
                   onChange={(e) => handleInputChange('observations', e.target.value)}
                   placeholder="Alguma particularidade importante da sua empresa ou expectativa inicial..."
                   className="w-full bg-cs-bg border border-cs-border rounded-xl p-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all resize-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 6. Identidade Visual & Brand Kit (Opcional) */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-cs-border text-white font-bold text-sm">
+              <Palette size={18} className="text-cs-primary" />
+              <span>6. Identidade Visual & Materiais da Marca (Opcional)</span>
+            </div>
+            <p className="text-xs text-cs-text-secondary">
+              Se você já tiver manual da marca, paleta de cores ou pasta no Google Drive/Canva, informe abaixo para acelerarmos o seu Brand Center.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-cs-text-secondary mb-1.5">
+                  Link da Pasta com Logos / Materiais (Google Drive ou Canva)
+                </label>
+                <input
+                  type="url"
+                  value={form.drive_url}
+                  onChange={(e) => handleInputChange('drive_url', e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-cs-text-secondary mb-1.5">
+                  Link direto do Logotipo (se houver)
+                </label>
+                <input
+                  type="url"
+                  value={form.logo_url}
+                  onChange={(e) => handleInputChange('logo_url', e.target.value)}
+                  placeholder="https://..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all"
+                />
+              </div>
+
+              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { key: 'primary_color', label: 'Cor Principal (HEX)' },
+                  { key: 'secondary_color', label: 'Cor Secundária (HEX)' },
+                  { key: 'accent_color', label: 'Cor de Destaque (HEX)' },
+                ].map(item => (
+                  <div key={item.key} className="bg-cs-bg border border-cs-border rounded-xl p-3 space-y-2">
+                    <label className="block text-[11px] font-semibold text-cs-text-secondary">{item.label}</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={form[item.key] ? normalizeHexColor(form[item.key], '#3b82f6') : '#3b82f6'}
+                        onChange={(e) => handleInputChange(item.key, e.target.value)}
+                        className="w-9 h-9 rounded-lg bg-transparent border border-cs-border cursor-pointer shrink-0"
+                      />
+                      <input
+                        type="text"
+                        value={form[item.key]}
+                        onChange={(e) => handleInputChange(item.key, e.target.value)}
+                        placeholder="#000000"
+                        className="w-full bg-cs-surface border border-cs-border rounded-lg px-2.5 py-2 text-xs text-white font-mono uppercase focus:outline-none focus:border-cs-primary"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-cs-text-secondary mb-1.5">
+                  Fontes / Tipografia (se já usar)
+                </label>
+                <input
+                  type="text"
+                  value={form.typography}
+                  onChange={(e) => handleInputChange('typography', e.target.value)}
+                  placeholder="Ex: Montserrat + Inter"
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-cs-text-secondary mb-1.5">
+                  Tom de Voz da Marca
+                </label>
+                <input
+                  type="text"
+                  value={form.tone_of_voice}
+                  onChange={(e) => handleInputChange('tone_of_voice', e.target.value)}
+                  placeholder="Ex: Técnico, acolhedor, sofisticado..."
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-cs-text-secondary mb-1.5">
+                  Público-alvo principal
+                </label>
+                <input
+                  type="text"
+                  value={form.target_audience}
+                  onChange={(e) => handleInputChange('target_audience', e.target.value)}
+                  placeholder="Ex: Pacientes de 30 a 60 anos em Poços de Caldas e região"
+                  className="w-full bg-cs-bg border border-cs-border rounded-xl px-4 py-3 text-sm text-white placeholder-cs-text-secondary/50 focus:outline-none focus:border-cs-primary transition-all"
                 />
               </div>
             </div>

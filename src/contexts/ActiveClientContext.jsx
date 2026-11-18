@@ -43,9 +43,11 @@ export function areClientIdsEquivalent(idA, idB, nameA = '', nameB = '') {
 }
 
 export function ActiveClientProvider({ children }) {
-  const { clients, loading, createClient, updateClient } = useClients();
+  const { clients, loading, createClient, updateClient, refetch } = useClients();
   const [selectedClientId, setSelectedClientIdState] = useState(() => {
     try {
+      const fromUrl = new URLSearchParams(window.location.search).get('client');
+      if (fromUrl) return fromUrl;
       return localStorage.getItem(STORAGE_KEY) || 'all';
     } catch {
       return 'all';
@@ -56,6 +58,10 @@ export function ActiveClientProvider({ children }) {
     setSelectedClientIdState(id);
     try {
       localStorage.setItem(STORAGE_KEY, id);
+      const url = new URL(window.location.href);
+      if (id && id !== 'all') url.searchParams.set('client', id);
+      else url.searchParams.delete('client');
+      window.history.replaceState(window.history.state, '', url);
     } catch (e) {
       console.warn('Erro ao salvar cliente ativo:', e);
     }
@@ -83,6 +89,7 @@ export function ActiveClientProvider({ children }) {
     clients,
     createClient,
     updateClient,
+    refetch,
     loading
   };
 

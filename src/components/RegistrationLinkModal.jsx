@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { X, Copy, Check, ExternalLink, Send, ShieldCheck, MessageSquare } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function RegistrationLinkModal({ isOpen, onClose }) {
+export default function RegistrationLinkModal({ isOpen, onClose, context = null }) {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedMsg, setCopiedMsg] = useState(false);
-  const [targetPhone, setTargetPhone] = useState('');
+  const [targetPhone, setTargetPhone] = useState(() => context?.phone || '');
 
   if (!isOpen) return null;
 
@@ -17,8 +17,16 @@ export default function RegistrationLinkModal({ isOpen, onClose }) {
     window.location.hostname.endsWith('.local')
   );
   const productionBaseUrl = 'https://sistema-agencia-eliteos.vercel.app';
-  const url = isLocal ? `${productionBaseUrl}/cadastro` : `${window.location.origin}/cadastro`;
-  const defaultMessage = `Olá! Para darmos início ao nosso contrato e prepararmos tudo na Comunicação Social Ag, por favor preencha seus dados cadastrais neste link seguro:\n\n${url}\n\nLeva menos de 2 minutos!`;
+  const baseUrl = isLocal ? `${productionBaseUrl}/cadastro` : `${window.location.origin}/cadastro`;
+  const query = new URLSearchParams();
+  if (context?.dealId) query.set('deal', context.dealId);
+  if (context?.clientId) query.set('client', context.clientId);
+  if (context?.company) query.set('company', context.company);
+  if (context?.value) query.set('value', String(context.value));
+  const qs = query.toString();
+  const url = qs ? `${baseUrl}?${qs}` : baseUrl;
+  const greetingName = context?.contact ? ` ${context.contact}` : '';
+  const defaultMessage = `Olá${greetingName}! Para darmos início ao contrato${context?.company ? ` da ${context.company}` : ''} e prepararmos o Brand Center na Comunicação Social Ag, preencha seus dados cadastrais e referências de marca neste link seguro:\n\n${url}\n\nLeva menos de 2 minutos!`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(url);

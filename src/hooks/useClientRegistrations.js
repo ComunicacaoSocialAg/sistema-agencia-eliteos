@@ -76,6 +76,7 @@ export function useClientRegistrations() {
       instagram_handle: formData.instagram_handle?.trim() || '',
       website_url: formData.website_url?.trim() || '',
       observations: formData.observations?.trim() || '',
+      raw_data: formData.raw_data && typeof formData.raw_data === 'object' ? formData.raw_data : {},
       status: 'pendente',
       created_at: new Date().toISOString()
     };

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Send, Bot, Loader2, Maximize2, Minimize2, ChevronDown, Mic, MicOff } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAIAssistant } from '../contexts/AIAssistantContext';
 import { chatWithAgentWithSystemPrompt, isAIConfigured } from '../lib/gemini';
 import { cn } from '../utils/cn';
@@ -23,7 +24,7 @@ Mantenha a memória de longo prazo do que já aprendemos sobre os clientes.
 ## Memórias Relevantes (O que já aprendemos):
 ${memories.length > 0 ? memories.map(m => `- ${m.key}: ${m.value}`).join('\n') : 'Nenhuma memória registrada ainda.'}
 
-## Contexto Atual da Tela — ${moduleContext.title}
+## Contexto Atual da Tela: ${moduleContext.title}
 Você está "vendo" exatamente o que o usuário Bruno vê agora. Use os dados técnicos abaixo para ser preciso:
 \`\`\`json
 ${JSON.stringify(moduleContext.data, null, 2)}
@@ -91,7 +92,7 @@ export default function AIAssistant() {
 
   const toggleListen = () => {
     if (!recognitionRef.current) {
-      alert('Seu navegador não suporta reconhecimento de voz. Tente usar o Google Chrome.');
+      toast.error('Seu navegador não suporta reconhecimento de voz. Tente usar o Google Chrome.');
       return;
     }
     if (isListening) {
